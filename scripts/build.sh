@@ -14,11 +14,11 @@ xcrun swiftc \
   -Onone \
   -target arm64-apple-macosx13.0 \
   -sdk "$SDK_PATH" \
-  -module-name DualSenseBridgeSDK \
+  -module-name DualSenseKit \
   -emit-module \
-  -emit-module-path "$BUILD_DIR/DualSenseBridgeSDK.swiftmodule" \
-  -c "$ROOT"/Sources/DualSenseBridgeSDK/*.swift \
-  -o "$BUILD_DIR/DualSenseBridgeSDK.o"
+  -emit-module-path "$BUILD_DIR/DualSenseKit.swiftmodule" \
+  -c "$ROOT"/Sources/DualSenseKit/*.swift \
+  -o "$BUILD_DIR/DualSenseKit.o"
 
 (
   cd "$BUILD_DIR"
@@ -28,10 +28,10 @@ xcrun swiftc \
     -target arm64-apple-macosx13.0 \
     -sdk "$SDK_PATH" \
     -I "$BUILD_DIR" \
-    -module-name DualSenseBridgeCore \
+    -module-name DualSenseKitDemoCore \
     -emit-module \
-    -emit-module-path "$BUILD_DIR/DualSenseBridgeCore.swiftmodule" \
-    -c "$ROOT"/Sources/DualSenseBridgeCore/*.swift
+    -emit-module-path "$BUILD_DIR/DualSenseKitDemoCore.swiftmodule" \
+    -c "$ROOT"/Sources/DualSenseKitDemoCore/*.swift
 )
 
 xcrun swiftc \
@@ -40,8 +40,8 @@ xcrun swiftc \
   -target arm64-apple-macosx13.0 \
   -sdk "$SDK_PATH" \
   -I "$BUILD_DIR" \
-  -module-name DualSenseBridge \
-  -c "$ROOT/Sources/DualSenseBridge/main.swift" \
+  -module-name DualSenseKitDemo \
+  -c "$ROOT/Sources/DualSenseKitDemo/main.swift" \
   -o "$BUILD_DIR/main.o"
 
 xcrun clang \
@@ -60,16 +60,16 @@ xcrun clang \
   -framework IOKit \
   -framework Network \
   -framework Security \
-  -o "$BUILD_DIR/DualSenseBridge"
+  -o "$BUILD_DIR/DualSenseKitDemo"
 
-APP_DIR="$BUILD_DIR/DualSenseBridge.app"
+APP_DIR="$BUILD_DIR/DualSenseKitDemo.app"
 mkdir -p "$APP_DIR/Contents/MacOS"
 cp "$ROOT/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
-cp "$BUILD_DIR/DualSenseBridge" "$APP_DIR/Contents/MacOS/DualSenseBridge"
-chmod +x "$APP_DIR/Contents/MacOS/DualSenseBridge"
+cp "$BUILD_DIR/DualSenseKitDemo" "$APP_DIR/Contents/MacOS/DualSenseKitDemo"
+chmod +x "$APP_DIR/Contents/MacOS/DualSenseKitDemo"
 printf 'APPL????' > "$APP_DIR/Contents/PkgInfo"
 xattr -cr "$APP_DIR"
 rm -rf "$APP_DIR/Contents/_CodeSignature"
 
-echo "$BUILD_DIR/DualSenseBridge"
+echo "$BUILD_DIR/DualSenseKitDemo"
 echo "$APP_DIR"

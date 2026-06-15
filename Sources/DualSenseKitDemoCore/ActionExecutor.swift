@@ -117,7 +117,7 @@ final class ActionExecutor: @unchecked Sendable {
 
     private func runShell(_ command: String, shellConfig: ShellConfig) {
         guard isShellCommandAllowed(command, shellConfig: shellConfig) else {
-            NSLog("DualSenseBridge blocked shell command: \(command)")
+            NSLog("DualSenseKitDemo blocked shell command: \(command)")
             return
         }
         let process = Process()
@@ -126,7 +126,7 @@ final class ActionExecutor: @unchecked Sendable {
         do {
             try process.run()
         } catch {
-            NSLog("DualSenseBridge shell command failed: \(error)")
+            NSLog("DualSenseKitDemo shell command failed: \(error)")
         }
     }
 }

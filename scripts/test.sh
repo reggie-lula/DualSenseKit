@@ -14,11 +14,11 @@ xcrun swiftc \
   -Onone \
   -target arm64-apple-macosx13.0 \
   -sdk "$SDK_PATH" \
-  -module-name DualSenseBridgeSDK \
+  -module-name DualSenseKit \
   -emit-module \
-  -emit-module-path "$BUILD_DIR/DualSenseBridgeSDK.swiftmodule" \
-  -c "$ROOT"/Sources/DualSenseBridgeSDK/*.swift \
-  -o "$BUILD_DIR/DualSenseBridgeSDK.o"
+  -emit-module-path "$BUILD_DIR/DualSenseKit.swiftmodule" \
+  -c "$ROOT"/Sources/DualSenseKit/*.swift \
+  -o "$BUILD_DIR/DualSenseKit.o"
 
 (
   cd "$BUILD_DIR"
@@ -28,10 +28,10 @@ xcrun swiftc \
     -target arm64-apple-macosx13.0 \
     -sdk "$SDK_PATH" \
     -I "$BUILD_DIR" \
-    -module-name DualSenseBridgeSelfTest \
+    -module-name DualSenseKitSelfTest \
     -emit-module \
-    -emit-module-path "$BUILD_DIR/DualSenseBridgeSelfTest.swiftmodule" \
-    -c "$ROOT"/Sources/DualSenseBridgeCore/*.swift "$ROOT/Tests/SelfTest/main.swift"
+    -emit-module-path "$BUILD_DIR/DualSenseKitSelfTest.swiftmodule" \
+    -c "$ROOT"/Sources/DualSenseKitDemoCore/*.swift "$ROOT/Tests/SelfTest/main.swift"
 )
 
 xcrun clang \

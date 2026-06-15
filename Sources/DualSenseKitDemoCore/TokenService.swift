@@ -2,13 +2,13 @@ import Foundation
 import Security
 
 final class TokenService: @unchecked Sendable {
-    private let service = "DualSenseBridge"
+    private let service = "DualSenseKitDemo"
     private let account = "LocalAPIToken"
     private let tokenFileURL: URL
 
     init(tokenFileURL: URL? = nil) {
         let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/DualSenseBridge", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/DualSenseKitDemo", isDirectory: true)
         self.tokenFileURL = tokenFileURL ?? supportDirectory.appendingPathComponent("api-token")
     }
 
@@ -114,7 +114,7 @@ final class TokenService: @unchecked Sendable {
                 ofItemAtPath: tokenFileURL.path
             )
         } catch {
-            NSLog("DualSenseBridge token mirror failed: \(error)")
+            NSLog("DualSenseKitDemo token mirror failed: \(error)")
         }
     }
 }

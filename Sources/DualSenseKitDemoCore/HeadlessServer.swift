@@ -1,7 +1,7 @@
 import Foundation
 
 @MainActor
-public func runDualSenseBridgeHeadlessServer() {
+public func runDualSenseKitDemoHeadlessServer() {
     let configStore = ConfigStore()
     let tokenService = TokenService()
     let eventBus = EventBus()
@@ -29,6 +29,6 @@ public func runDualSenseBridgeHeadlessServer() {
     controllerService.start()
     controllerService.resetEffects()
     apiServer.start()
-    print("DualSenseBridge headless server listening on \(configStore.current.server.host):\(configStore.current.server.port)")
+    print("DualSenseKitDemo headless server listening on \(configStore.current.server.host):\(configStore.current.server.port)")
     RunLoop.main.run()
 }

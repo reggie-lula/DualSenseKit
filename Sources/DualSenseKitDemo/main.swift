@@ -1,13 +1,13 @@
-import DualSenseBridgeCore
+import DualSenseKitDemoCore
 
 @main
-struct DualSenseBridgeMain {
+struct DualSenseKitDemoMain {
     @MainActor
     static func main() {
         if CommandLine.arguments.contains("--headless-server") {
-            runDualSenseBridgeHeadlessServer()
+            runDualSenseKitDemoHeadlessServer()
         } else {
-            runDualSenseBridgeApp()
+            runDualSenseKitDemoApp()
         }
     }
 }

@@ -1,13 +1,13 @@
 import Foundation
 import GameController
-import DualSenseBridgeSDK
+import DualSenseKit
 
 final class ControllerService: @unchecked Sendable {
     private let eventBus: EventBus
     private let configStore: ConfigStore
     private let actionExecutor: ActionExecutor
     private let touchpadMapper = TouchpadMouseMapper()
-    private let stateQueue = DispatchQueue(label: "DualSenseBridge.ControllerState")
+    private let stateQueue = DispatchQueue(label: "DualSenseKitDemo.ControllerState")
     private lazy var hidService = DualSenseHIDService(
         buttonUpdate: { [weak self] button, pressed, value in
             self?.updateButton(button, value: value, pressed: pressed)

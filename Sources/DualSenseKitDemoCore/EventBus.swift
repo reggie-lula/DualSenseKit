@@ -8,7 +8,7 @@ struct BridgeEvent: Codable, Equatable, Sendable {
 
 final class EventBus: @unchecked Sendable {
     typealias Handler = (BridgeEvent) -> Void
-    private let queue = DispatchQueue(label: "DualSenseBridge.EventBus")
+    private let queue = DispatchQueue(label: "DualSenseKitDemo.EventBus")
     private var handlers: [UUID: Handler] = [:]
     private var recentEvents: [BridgeEvent] = []
     private let maxRecentEvents = 200

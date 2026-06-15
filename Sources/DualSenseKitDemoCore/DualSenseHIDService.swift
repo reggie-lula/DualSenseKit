@@ -1,13 +1,13 @@
 import Foundation
 import IOKit.hid
-import DualSenseBridgeSDK
+import DualSenseKit
 
 final class DualSenseHIDService: @unchecked Sendable {
     typealias ButtonUpdate = (ControllerButton, Bool, Float) -> Void
     typealias AxisUpdate = (String, Float) -> Void
     typealias TouchUpdate = (String, Float, Float, Bool) -> Void
 
-    private let queue = DispatchQueue(label: "DualSenseBridge.DualSenseHIDService")
+    private let queue = DispatchQueue(label: "DualSenseKitDemo.DualSenseHIDService")
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
     private var inputBuffer: UnsafeMutablePointer<UInt8>?

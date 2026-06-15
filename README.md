@@ -1,6 +1,6 @@
-# DualSenseBridge
+# DualSenseKit
 
-DualSenseBridge is a macOS menu-bar helper for using a Bluetooth DualSense/PS5 controller as a productivity input device.
+DualSenseKit is a Swift SDK for parsing and controlling Sony DualSense controllers, with a macOS MVP demo app for local hardware testing.
 
 ## Features
 
@@ -11,7 +11,7 @@ DualSenseBridge is a macOS menu-bar helper for using a Bluetooth DualSense/PS5 c
 - Controls controller RGB light through Apple's `GameController` light API when available.
 - Provides a local browser hardware test panel at `http://127.0.0.1:17395/test`.
 - Adds a minimal DualSense HID path for the microphone mute button and 5 player LEDs.
-- Includes `DualSenseBridgeSDK`, a reusable Swift protocol layer for DualSense HID input parsing and output report encoding.
+- Includes `DualSenseKit`, a reusable Swift protocol layer for DualSense HID input parsing and output report encoding.
 - Detects DualSense audio capability and falls back cleanly when controller speaker output is unsupported.
 - Runs as an accessory/menu-bar app with no Dock icon.
 
@@ -26,19 +26,19 @@ scripts/build.sh
 The executable is written to:
 
 ```sh
-.manual-build/DualSenseBridge
+.manual-build/DualSenseKitDemo
 ```
 
 The menu-bar app bundle is written to:
 
 ```sh
-.manual-build/DualSenseBridge.app
+.manual-build/DualSenseKitDemo.app
 ```
 
 For MVP hardware testing in this local CLT environment, start the headless server:
 
 ```sh
-.manual-build/DualSenseBridge --headless-server
+.manual-build/DualSenseKitDemo --headless-server
 ```
 
 Then open:
@@ -51,12 +51,12 @@ For macOS Accessibility permissions, install the app to a stable path before gra
 
 ```sh
 scripts/install.sh
-open -n ~/Applications/DualSenseBridge.app
+open -n ~/Applications/DualSenseKitDemo.app
 ```
 
 Note: this local unsigned/ad-hoc bundle can be killed by macOS on some builds. The headless executable above is the verified MVP test path in this workspace.
 
-If you previously granted permission to a development build, remove the old `DualSenseBridge` entry from System Settings, then add `~/Applications/DualSenseBridge.app` and enable it. Rebuilding into `.manual-build` can change the ad-hoc signature and invalidate the old TCC entry.
+If you previously granted permission to a development build, remove the old `DualSenseKitDemo` entry from System Settings, then add `~/Applications/DualSenseKitDemo.app` and enable it. Rebuilding into `.manual-build` can change the ad-hoc signature and invalidate the old TCC entry.
 
 ## Test
 
@@ -73,7 +73,7 @@ It verifies config JSON round-tripping, RGB/player LED payloads, shell whitelist
 The reusable SDK target lives in:
 
 ```sh
-Sources/DualSenseBridgeSDK
+Sources/DualSenseKit
 ```
 
 It exposes:
@@ -87,7 +87,7 @@ It exposes:
 Example:
 
 ```swift
-import DualSenseBridgeSDK
+import DualSenseKit
 
 var state = DualSenseOutputState()
 DualSenseProtocol.apply(.playerLEDs(mask: 0x1f), to: &state)
@@ -101,7 +101,7 @@ The SDK protocol layout is cross-checked against the public WebHID implementatio
 Start the verified MVP server:
 
 ```sh
-.manual-build/DualSenseBridge --headless-server
+.manual-build/DualSenseKitDemo --headless-server
 ```
 
 Read status:
@@ -113,7 +113,7 @@ curl -s http://127.0.0.1:17395/v1/status
 Read controller diagnostics:
 
 ```sh
-TOKEN="$(cat ~/Library/Application\ Support/DualSenseBridge/api-token)"
+TOKEN="$(cat ~/Library/Application\ Support/DualSenseKitDemo/api-token)"
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:17395/v1/controller
 ```
 
@@ -158,7 +158,7 @@ If mouse or keyboard injection does not work, grant Accessibility permission to 
 Startup diagnostics are written to:
 
 ```sh
-~/Library/Application Support/DualSenseBridge/diagnostics.log
+~/Library/Application Support/DualSenseKitDemo/diagnostics.log
 ```
 
 ## API
@@ -166,8 +166,8 @@ Startup diagnostics are written to:
 `GET /v1/status` is unauthenticated so clients can discover health and the token file path. All other endpoints require one of:
 
 ```sh
-Authorization: Bearer "$(cat ~/Library/Application\ Support/DualSenseBridge/api-token)"
-X-DualSenseBridge-Token: "$(cat ~/Library/Application\ Support/DualSenseBridge/api-token)"
+Authorization: Bearer "$(cat ~/Library/Application\ Support/DualSenseKitDemo/api-token)"
+X-DualSenseKitDemo-Token: "$(cat ~/Library/Application\ Support/DualSenseKitDemo/api-token)"
 ```
 
 The server rejects accepted connections whose remote endpoint is not loopback.
@@ -196,11 +196,11 @@ The server rejects accepted connections whose remote endpoint is not loopback.
 Configuration is stored at:
 
 ```sh
-~/Library/Application Support/DualSenseBridge/config.json
+~/Library/Application Support/DualSenseKitDemo/config.json
 ```
 
 The local API token is stored in Keychain and mirrored for developer clients at:
 
 ```sh
-~/Library/Application Support/DualSenseBridge/api-token
+~/Library/Application Support/DualSenseKitDemo/api-token
 ```

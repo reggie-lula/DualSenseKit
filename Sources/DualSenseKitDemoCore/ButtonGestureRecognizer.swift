@@ -9,7 +9,7 @@ final class ButtonGestureRecognizer: @unchecked Sendable {
         var pendingSingleWorkItem: DispatchWorkItem?
     }
 
-    private let queue = DispatchQueue(label: "DualSenseBridge.ButtonGestureRecognizer")
+    private let queue = DispatchQueue(label: "DualSenseKitDemo.ButtonGestureRecognizer")
     private var states: [ControllerButton: ButtonState] = [:]
     private let configProvider: () -> GestureTimingConfig
     private let emit: Emit

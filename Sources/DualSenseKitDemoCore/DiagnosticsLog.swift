@@ -1,11 +1,11 @@
 import Foundation
 
 enum DiagnosticsLog {
-    private static let queue = DispatchQueue(label: "DualSenseBridge.DiagnosticsLog")
+    private static let queue = DispatchQueue(label: "DualSenseKitDemo.DiagnosticsLog")
 
     static var logURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/DualSenseBridge", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/DualSenseKitDemo", isDirectory: true)
             .appendingPathComponent("diagnostics.log")
     }
 
@@ -27,7 +27,7 @@ enum DiagnosticsLog {
                     try Data(line.utf8).write(to: logURL, options: [.atomic])
                 }
             } catch {
-                NSLog("DualSenseBridge diagnostics log failed: \(error)")
+                NSLog("DualSenseKitDemo diagnostics log failed: \(error)")
             }
         }
     }

@@ -1,7 +1,7 @@
 import Foundation
 
 final class ConfigStore: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "DualSenseBridge.ConfigStore")
+    private let queue = DispatchQueue(label: "DualSenseKitDemo.ConfigStore")
     private let encoder: JSONEncoder
     private let decoder = JSONDecoder()
     private(set) var current = BridgeConfig()
@@ -9,7 +9,7 @@ final class ConfigStore: @unchecked Sendable {
 
     init(configURL: URL? = nil) {
         let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/DualSenseBridge", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/DualSenseKitDemo", isDirectory: true)
         self.configURL = configURL ?? supportDirectory.appendingPathComponent("config.json")
         self.encoder = JSONEncoder()
         self.encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -50,7 +50,7 @@ final class ConfigStore: @unchecked Sendable {
             let data = try encoder.encode(config)
             try data.write(to: configURL, options: [.atomic])
         } catch {
-            NSLog("DualSenseBridge config save failed: \(error)")
+            NSLog("DualSenseKitDemo config save failed: \(error)")
         }
     }
 }

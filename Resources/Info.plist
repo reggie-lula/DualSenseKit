@@ -5,13 +5,13 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
-  <string>DualSenseBridge</string>
+  <string>DualSenseKitDemo</string>
   <key>CFBundleIdentifier</key>
   <string>local.dualsensebridge.app</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>DualSenseBridge</string>
+  <string>DualSenseKitDemo</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

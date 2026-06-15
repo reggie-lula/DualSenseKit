@@ -11,7 +11,7 @@ final class APIServer: @unchecked Sendable {
     private let eventBus: EventBus
     private let tokenService: TokenService
     private var listener: NWListener?
-    private let queue = DispatchQueue(label: "DualSenseBridge.APIServer")
+    private let queue = DispatchQueue(label: "DualSenseKitDemo.APIServer")
     private var websocketConnections: [ObjectIdentifier: NWConnection] = [:]
 
     init(
@@ -50,7 +50,7 @@ final class APIServer: @unchecked Sendable {
             self.listener = listener
             DiagnosticsLog.write("api listener started on port \(config.port)")
         } catch {
-            NSLog("DualSenseBridge API server failed to start: \(error)")
+            NSLog("DualSenseKitDemo API server failed to start: \(error)")
             DiagnosticsLog.write("api listener failed: \(error)")
         }
     }
@@ -377,7 +377,7 @@ final class APIServer: @unchecked Sendable {
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>DualSenseBridge Test</title>
+          <title>DualSenseKitDemo Test</title>
           <style>
             :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
             body { margin: 0; background: Canvas; color: CanvasText; }
@@ -405,7 +405,7 @@ final class APIServer: @unchecked Sendable {
           </style>
         </head>
         <body>
-          <header><h1>DualSenseBridge 硬件测试 MVP</h1></header>
+          <header><h1>DualSenseKitDemo 硬件测试 MVP</h1></header>
           <main>
             <section>
               <h2>状态</h2>

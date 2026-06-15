@@ -14,7 +14,7 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "DualSenseBridge 设置"
+        window.title = "DualSenseKitDemo 设置"
         super.init(window: window)
     }
 

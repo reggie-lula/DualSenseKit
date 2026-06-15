@@ -3,20 +3,20 @@
 import PackageDescription
 
 let package = Package(
-    name: "DualSenseBridge",
+    name: "DualSenseKit",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "DualSenseBridge", targets: ["DualSenseBridge"]),
-        .library(name: "DualSenseBridgeSDK", targets: ["DualSenseBridgeSDK"]),
-        .library(name: "DualSenseBridgeCore", targets: ["DualSenseBridgeCore"])
+        .executable(name: "DualSenseKitDemo", targets: ["DualSenseKitDemo"]),
+        .library(name: "DualSenseKit", targets: ["DualSenseKit"]),
+        .library(name: "DualSenseKitDemoCore", targets: ["DualSenseKitDemoCore"])
     ],
     targets: [
-        .target(name: "DualSenseBridgeSDK"),
+        .target(name: "DualSenseKit"),
         .target(
-            name: "DualSenseBridgeCore",
-            dependencies: ["DualSenseBridgeSDK"],
+            name: "DualSenseKitDemoCore",
+            dependencies: ["DualSenseKit"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("ApplicationServices"),
@@ -30,8 +30,8 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "DualSenseBridge",
-            dependencies: ["DualSenseBridgeCore"]
+            name: "DualSenseKitDemo",
+            dependencies: ["DualSenseKitDemoCore"]
         )
     ]
 )

@@ -92,14 +92,14 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
             }
             return .macFallback
         } catch {
-            NSLog("DualSenseBridge audio play failed: \(error)")
+            NSLog("DualSenseKitDemo audio play failed: \(error)")
             return .unsupported
         }
     }
 
     private func sayThroughDualSense(_ request: SayAudioRequest) -> AudioCapability {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("DualSenseBridge-\(UUID().uuidString).aiff")
+            .appendingPathComponent("DualSenseKitDemo-\(UUID().uuidString).aiff")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
         var arguments = ["-o", url.path]
@@ -116,7 +116,7 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
             }
             return playFile(path: url.path, preferDualSense: true)
         } catch {
-            NSLog("DualSenseBridge say failed: \(error)")
+            NSLog("DualSenseKitDemo say failed: \(error)")
             return .unsupported
         }
     }

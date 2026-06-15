@@ -4,8 +4,8 @@ private var retainedAppDelegate: AppDelegate?
 private var retainedCoordinator: AppCoordinator?
 
 @MainActor
-public func runDualSenseBridgeApp() {
-    DiagnosticsLog.write("runDualSenseBridgeApp enter args=\(CommandLine.arguments)")
+public func runDualSenseKitDemoApp() {
+    DiagnosticsLog.write("runDualSenseKitDemoApp enter args=\(CommandLine.arguments)")
     let app = NSApplication.shared
     let delegate = AppDelegate()
     retainedAppDelegate = delegate
@@ -14,7 +14,7 @@ public func runDualSenseBridgeApp() {
     let coordinator = AppCoordinator()
     retainedCoordinator = coordinator
     coordinator.start()
-    DiagnosticsLog.write("runDualSenseBridgeApp before app.run")
+    DiagnosticsLog.write("runDualSenseKitDemoApp before app.run")
     app.run()
 }
 
