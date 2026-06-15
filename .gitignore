@@ -1,0 +1,4 @@
+.build/
+.manual-build/
+.manual-test-build/
+.DS_Store
