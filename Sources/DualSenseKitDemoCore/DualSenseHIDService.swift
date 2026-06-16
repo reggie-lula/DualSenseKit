@@ -113,10 +113,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         let safeMask = mask & 0x1f
         let safeBrightness = brightness.map { min($0, 2) }
         return queue.sync {
-            guard let device, isOpen else {
-                statusText = "hid_not_open"
-                return false
-            }
+            guard let device = writableDevice() else { return false }
             let firstResult = sendReport(.playerLEDs(mask: safeMask, brightness: safeBrightness), device: device)
             if firstResult == kIOReturnSuccess {
                 statusText = "player_leds_set_\(safeMask)"
@@ -139,10 +136,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         let ok = queue.sync {
             rumbleStopWorkItem?.cancel()
             rumbleStopWorkItem = nil
-            guard let device, isOpen else {
-                statusText = "hid_not_open"
-                return false
-            }
+            guard let device = writableDevice() else { return false }
             let result = sendReport(.rumble(leftMotor: safeLeft, rightMotor: safeRight), device: device)
             statusText = result == kIOReturnSuccess
                 ? "rumble_set_left_\(safeLeft)_right_\(safeRight)"
@@ -171,10 +165,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     func setMicMuteLED(control: UInt8) -> Bool {
         let safeControl = min(control, 2)
         return queue.sync {
-            guard let device, isOpen else {
-                statusText = "hid_not_open"
-                return false
-            }
+            guard let device = writableDevice() else { return false }
             let result = sendReport(.micMuteLED(control: safeControl), device: device)
             statusText = result == kIOReturnSuccess
                 ? "mic_mute_led_\(safeControl)"
@@ -186,10 +177,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     @discardableResult
     func setLightbar(red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?) -> Bool {
         queue.sync {
-            guard let device, isOpen else {
-                statusText = "hid_not_open"
-                return false
-            }
+            guard let device = writableDevice() else { return false }
             let result = sendReport(.lightbar(red: red, green: green, blue: blue, brightness: brightness), device: device)
             statusText = result == kIOReturnSuccess
                 ? "lightbar_set"
@@ -201,10 +189,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     @discardableResult
     func setAdaptiveTrigger(side: DualSenseTriggerSide, mode: UInt8, params: [UInt8]) -> Bool {
         queue.sync {
-            guard let device, isOpen else {
-                statusText = "hid_not_open"
-                return false
-            }
+            guard let device = writableDevice() else { return false }
             let result = sendReport(.adaptiveTrigger(side: side, mode: mode, params: params), device: device)
             statusText = result == kIOReturnSuccess
                 ? "hid_trigger_set"
@@ -416,6 +401,23 @@ final class DualSenseHIDService: @unchecked Sendable {
         if result != kIOReturnSuccess {
             statusText = "device_reopen_failed_\(String(format: "%08x", result))"
         }
+    }
+
+    private func writableDevice() -> IOHIDDevice? {
+        guard let device else {
+            statusText = "hid_not_connected"
+            return nil
+        }
+        if isOpen {
+            return device
+        }
+        reopenDevice(device)
+        if isOpen {
+            statusText = "device_reopened"
+            return device
+        }
+        statusText = "hid_not_open"
+        return nil
     }
 
     private func match(productID: Int) -> [String: Any] {
