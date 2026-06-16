@@ -211,7 +211,7 @@ public enum DualSenseProtocol {
         case .playerLEDs(let mask, let brightness):
             state.playerIndicator = mask & 0x1f
             if let brightness {
-                state.ledBrightness = min(brightness, 2)
+                state.ledBrightness = brightness
                 state.validFlag2 |= 0x01
             }
             state.validFlag1 |= 0x10

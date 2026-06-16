@@ -12,7 +12,7 @@ public func runDualSenseKitDemoHeadlessServer() {
         configStore: configStore,
         actionExecutor: actionExecutor
     )
-    let lightService = LightService(controllerService: controllerService)
+    let lightService = LightService(controllerService: controllerService, eventBus: eventBus)
     let audioService = AudioService()
     let apiServer = APIServer(
         configStore: configStore,
@@ -27,7 +27,6 @@ public func runDualSenseKitDemoHeadlessServer() {
     _ = configStore.load()
     _ = tokenService.token()
     controllerService.start()
-    controllerService.resetEffects()
     apiServer.start()
     print("DualSenseKitDemo headless server listening on \(configStore.current.server.host):\(configStore.current.server.port)")
     RunLoop.main.run()

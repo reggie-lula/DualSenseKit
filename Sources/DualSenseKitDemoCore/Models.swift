@@ -199,6 +199,7 @@ struct RGBColorRequest: Codable, Equatable, Sendable {
 struct PlayerLEDRequest: Codable, Equatable, Sendable {
     var mask: UInt8
     var brightness: UInt8? = nil
+    var brightnessLinear: Float? = nil
 }
 
 struct MicMuteLEDRequest: Codable, Equatable, Sendable {
@@ -217,6 +218,68 @@ struct LightbarRequest: Codable, Equatable, Sendable {
     var g: UInt8? = nil
     var b: UInt8? = nil
     var brightness: Float? = nil
+}
+
+struct LightbarState: Codable, Equatable, Sendable {
+    var r: UInt8 = 0
+    var g: UInt8 = 255
+    var b: UInt8 = 0
+    var brightness: Float = 1
+}
+
+struct PlayerLEDState: Codable, Equatable, Sendable {
+    var mask: UInt8 = 0
+    var brightness: UInt8 = 0
+    var brightnessLinear: Float? = nil
+    var linearBrightnessSupported: Bool = false
+    var colorSupported: Bool = false
+    var limitation: String = "player LEDs are treated as white indicators until HID probing proves otherwise"
+}
+
+struct MicLEDState: Codable, Equatable, Sendable {
+    var mode: MicMuteLEDMode = .off
+}
+
+struct LightingAnimationState: Codable, Equatable, Sendable {
+    var enabled: Bool = false
+    var target: String? = nil
+    var periodMs: Int = 1600
+}
+
+struct LightingState: Codable, Equatable, Sendable {
+    var lightbar = LightbarState()
+    var playerLEDs = PlayerLEDState()
+    var micLED = MicLEDState()
+    var animation = LightingAnimationState()
+}
+
+struct LightingAnimationRequest: Codable, Equatable, Sendable {
+    var enabled: Bool
+    var target: String? = nil
+    var periodMs: Int? = nil
+}
+
+struct PlayerLEDProbeRequest: Codable, Equatable, Sendable {
+    var mask: UInt8? = nil
+    var start: UInt8? = nil
+    var end: UInt8? = nil
+    var step: UInt8? = nil
+    var dwellMs: Int? = nil
+
+    init(mask: UInt8? = nil, start: UInt8? = nil, end: UInt8? = nil, step: UInt8? = nil, dwellMs: Int? = nil) {
+        self.mask = mask
+        self.start = start
+        self.end = end
+        self.step = step
+        self.dwellMs = dwellMs
+    }
+}
+
+struct PlayerLEDProbeResult: Codable, Equatable, Sendable {
+    var testedValues: [UInt8]
+    var linearBrightnessSupported: Bool
+    var colorSupported: Bool
+    var note: String
 }
 
 struct RumbleRequest: Codable, Equatable, Sendable {
@@ -300,6 +363,37 @@ struct AudioOutputDevice: Codable, Equatable, Sendable {
     var id: UInt32
     var name: String
     var uid: String?
+}
+
+struct AudioInputDevice: Codable, Equatable, Sendable {
+    var id: UInt32
+    var name: String
+    var uid: String?
+}
+
+struct AudioDevicesResponse: Codable, Equatable, Sendable {
+    var outputs: [AudioOutputDevice]
+    var inputs: [AudioInputDevice]
+    var dualSenseOutput: AudioOutputDevice?
+    var dualSenseInput: AudioInputDevice?
+    var virtualDriver: AudioDriverStatus
+}
+
+struct AudioDriverStatus: Codable, Equatable, Sendable {
+    var installed: Bool
+    var active: Bool
+    var authorizationRequired: Bool
+    var outputDeviceName: String
+    var inputDeviceName: String
+    var bridgeStatus: String
+    var note: String
+}
+
+struct AudioDriverInstallGuide: Codable, Equatable, Sendable {
+    var title: String
+    var steps: [String]
+    var requirements: [String]
+    var warning: String
 }
 
 enum AudioCapability: String, Codable, Equatable, Sendable {

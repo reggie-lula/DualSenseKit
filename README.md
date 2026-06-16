@@ -9,10 +9,11 @@ DualSenseKit is a Swift SDK for parsing and controlling Sony DualSense controlle
 - Supports single-click, double-click, long-press, press, and release gestures.
 - Provides local HTTP and WebSocket APIs on `127.0.0.1:17395`.
 - Controls controller RGB light through Apple's `GameController` light API when available.
+- Keeps controller lighting as backend state so browser refresh, focus changes, and WebSocket reconnects do not reset hardware effects.
 - Provides a local browser hardware test panel at `http://127.0.0.1:17395/test`.
-- Adds a minimal DualSense HID path for the microphone mute button and 5 player LEDs.
+- Adds a minimal DualSense HID path for the microphone mute button and 5 white player LEDs.
 - Includes `DualSenseKit`, a reusable Swift protocol layer for DualSense HID input parsing and output report encoding.
-- Detects DualSense audio capability and falls back cleanly when controller speaker output is unsupported.
+- Detects DualSense audio capability, reports virtual-driver status, and falls back cleanly when controller audio transport is unavailable.
 - Runs as an accessory/menu-bar app with no Dock icon.
 
 ## Build
@@ -133,8 +134,24 @@ Set the 5 player LEDs:
 curl -s -X PUT \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  --data '{"mask":31}' \
+  --data '{"mask":31,"brightness":0}' \
   http://127.0.0.1:17395/v1/light/player-leds
+```
+
+Read the backend-persistent lighting state:
+
+```sh
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:17395/v1/light/state
+```
+
+Probe raw player LED brightness values:
+
+```sh
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"mask":31,"start":0,"end":255,"step":1,"dwellMs":40}' \
+  http://127.0.0.1:17395/v1/light/player-leds/probe
 ```
 
 Run the MVP light sequence:
@@ -145,13 +162,16 @@ curl -s -X POST \
   http://127.0.0.1:17395/v1/test/light-sequence
 ```
 
-List audio outputs:
+List audio devices and virtual driver status:
 
 ```sh
-curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:17395/v1/audio/outputs
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:17395/v1/audio/devices
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:17395/v1/audio/driver/status
 ```
 
 When a DualSense output device is available, `/v1/audio/play` and `/v1/audio/say` temporarily route the system default output to the controller, play the sound, then restore the previous default output. If no DualSense output is available, calls return `unsupported` unless `useMacFallback` is true.
+
+The virtual audio direction is tracked as a DriverKit/System Extension target. The MVP exposes diagnostics and installation guidance, but it does not silently install or authorize a system audio driver.
 
 If mouse or keyboard injection does not work, grant Accessibility permission to the built app in System Settings. The status response includes `accessibilityTrusted`.
 
@@ -178,17 +198,24 @@ The server rejects accepted connections whose remote endpoint is not loopback.
 - `GET /v1/controller`
 - `GET /v1/events/recent`
 - `GET /v1/hid/raw/recent`
+- `GET /v1/light/state`
 - `PUT /v1/config`
 - `PUT /v1/light` with `{"r":255,"g":80,"b":0}`
 - `PUT /v1/light/lightbar` with `{"r":0,"g":255,"b":0,"brightness":1.0}`
-- `PUT /v1/light/player-leds` with `{"mask":31,"brightness":0}` where brightness is `0` high, `1` medium, `2` low
+- `PUT /v1/light/state` with lightbar, player LED, mic LED, and animation state in one payload
+- `PUT /v1/light/player-leds` with `{"mask":31,"brightness":0}`. Player LEDs are treated as white indicators; raw brightness probing is available, but linear brightness and color are not enabled until verified on hardware.
 - `PUT /v1/light/mic-mute` with `{"mode":"off"|"on"|"breathe"}` or legacy `{"on":true}`
+- `POST /v1/light/player-leds/probe` with `{"mask":31,"start":0,"end":255,"step":1,"dwellMs":40}`
+- `POST /v1/light/animation` with `{"enabled":true,"target":"lightbar","kind":"breathe","periodMs":1600}`
 - `PUT /v1/haptics/rumble` with `{"heavy":0.4,"light":0.2,"durationMs":1000}`; legacy `left/right` is still accepted
 - `PUT /v1/triggers` with `{"left":{"mode":"feedback"|"weapon"|"vibration"|"slopeFeedback"|"off","startPosition":0.1,"endPosition":0.8,"strength":0.5,"frequency":10},"right":{"mode":"off"}}`
 - `POST /v1/test/light-sequence`
 - `POST /v1/test/reset-effects`
 - `POST /v1/audio/play`
 - `GET /v1/audio/outputs`
+- `GET /v1/audio/devices`
+- `GET /v1/audio/driver/status`
+- `POST /v1/audio/driver/install-guide`
 - `POST /v1/audio/say`
 - `POST /v1/actions/trigger`
 - `WS /v1/events`

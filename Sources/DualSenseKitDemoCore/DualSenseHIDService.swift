@@ -111,7 +111,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     @discardableResult
     func setPlayerLEDs(mask: UInt8, brightness: UInt8? = nil) -> Bool {
         let safeMask = mask & 0x1f
-        let safeBrightness = brightness.map { min($0, 2) }
+        let safeBrightness = brightness
         return queue.sync {
             guard let device = writableDevice() else { return false }
             let firstResult = sendReport(.playerLEDs(mask: safeMask, brightness: safeBrightness), device: device)

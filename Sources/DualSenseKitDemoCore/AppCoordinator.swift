@@ -14,7 +14,7 @@ final class AppCoordinator {
         configStore: configStore,
         actionExecutor: actionExecutor
     )
-    private lazy var lightService = LightService(controllerService: controllerService)
+    private lazy var lightService = LightService(controllerService: controllerService, eventBus: eventBus)
     private lazy var audioService = AudioService()
     private lazy var apiServer = APIServer(
         configStore: configStore,
@@ -34,8 +34,6 @@ final class AppCoordinator {
         DiagnosticsLog.write("token ready")
         controllerService.start()
         DiagnosticsLog.write("controller service started")
-        controllerService.resetEffects()
-        DiagnosticsLog.write("controller effects reset")
         apiServer.start()
         DiagnosticsLog.write("api server start requested")
         statusItem.onOpenSettings = { [weak self] in self?.openSettings() }

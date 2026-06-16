@@ -130,6 +130,9 @@ final class APIServer: @unchecked Sendable {
         case ("GET", "/v1/hid/raw/recent"):
             sendCodable(status: 200, value: controllerService.recentRawHIDReports(), connection: connection)
 
+        case ("GET", "/v1/light/state"):
+            sendCodable(status: 200, value: lightService.state(), connection: connection)
+
         case ("PUT", "/v1/config"):
             do {
                 let config = try JSONDecoder().decode(BridgeConfig.self, from: request.body)
@@ -155,7 +158,7 @@ final class APIServer: @unchecked Sendable {
                     send(status: 400, json: ["error": "invalid_player_led_mask"], connection: connection)
                     return
                 }
-                let ok = controllerService.setPlayerLEDs(mask: request.mask, brightness: request.brightness)
+                let ok = lightService.setPlayerLEDs(request)
                 send(status: ok ? 200 : 409, json: ["ok": "\(ok)"], connection: connection)
             } catch {
                 send(status: 400, json: ["error": "invalid_player_led_request"], connection: connection)
@@ -164,7 +167,7 @@ final class APIServer: @unchecked Sendable {
         case ("PUT", "/v1/light/mic-mute"):
             do {
                 let request = try JSONDecoder().decode(MicMuteLEDRequest.self, from: request.body)
-                let ok = controllerService.setMicMuteLED(request)
+                let ok = lightService.setMicLED(request)
                 send(status: ok ? 200 : 409, json: ["ok": "\(ok)"], connection: connection)
             } catch {
                 send(status: 400, json: ["error": "invalid_mic_mute_led_request"], connection: connection)
@@ -173,7 +176,7 @@ final class APIServer: @unchecked Sendable {
         case ("PUT", "/v1/light/lightbar"):
             do {
                 let request = try JSONDecoder().decode(LightbarRequest.self, from: request.body)
-                let ok = controllerService.setLightbar(request)
+                let ok = lightService.setLightbar(request)
                 send(status: ok ? 200 : 409, json: ["ok": "\(ok)"], connection: connection)
             } catch {
                 send(status: 400, json: ["error": "invalid_lightbar_request"], connection: connection)
@@ -197,12 +200,40 @@ final class APIServer: @unchecked Sendable {
                 send(status: 400, json: ["error": "invalid_trigger_request"], connection: connection)
             }
 
+        case ("PUT", "/v1/light/state"):
+            do {
+                let request = try JSONDecoder().decode(LightingState.self, from: request.body)
+                let ok = lightService.apply(request)
+                send(status: ok ? 200 : 409, json: ["ok": "\(ok)"], connection: connection)
+            } catch {
+                send(status: 400, json: ["error": "invalid_light_state"], connection: connection)
+            }
+
+        case ("POST", "/v1/light/player-leds/probe"):
+            do {
+                let probe = request.body.isEmpty
+                    ? PlayerLEDProbeRequest()
+                    : try JSONDecoder().decode(PlayerLEDProbeRequest.self, from: request.body)
+                sendCodable(status: 200, value: lightService.probePlayerLEDs(probe), connection: connection)
+            } catch {
+                send(status: 400, json: ["error": "invalid_player_led_probe"], connection: connection)
+            }
+
+        case ("POST", "/v1/light/animation"):
+            do {
+                let request = try JSONDecoder().decode(LightingAnimationRequest.self, from: request.body)
+                sendCodable(status: 200, value: lightService.setAnimation(request), connection: connection)
+            } catch {
+                send(status: 400, json: ["error": "invalid_light_animation"], connection: connection)
+            }
+
         case ("POST", "/v1/test/light-sequence"):
             runLightSequence()
             send(status: 200, json: ["ok": "true"], connection: connection)
 
         case ("POST", "/v1/test/reset-effects"):
             controllerService.resetEffects()
+            lightService.resetEffects()
             send(status: 200, json: ["ok": "true"], connection: connection)
 
         case ("POST", "/v1/audio/play"):
@@ -215,6 +246,15 @@ final class APIServer: @unchecked Sendable {
 
         case ("GET", "/v1/audio/outputs"):
             sendCodable(status: 200, value: audioService.outputDevices(), connection: connection)
+
+        case ("GET", "/v1/audio/devices"):
+            sendCodable(status: 200, value: audioService.devices(), connection: connection)
+
+        case ("GET", "/v1/audio/driver/status"):
+            sendCodable(status: 200, value: audioService.driverStatus(), connection: connection)
+
+        case ("POST", "/v1/audio/driver/install-guide"):
+            sendCodable(status: 200, value: audioService.driverInstallGuide(), connection: connection)
 
         case ("POST", "/v1/audio/say"):
             do {
@@ -341,25 +381,25 @@ final class APIServer: @unchecked Sendable {
     }
 
     private func runLightSequence() {
-        DispatchQueue.global(qos: .userInitiated).async { [lightService, controllerService, eventBus] in
+        DispatchQueue.global(qos: .userInitiated).async { [lightService, eventBus] in
             let colors = [
-                RGBColorRequest(r: 255, g: 0, b: 0),
-                RGBColorRequest(r: 0, g: 255, b: 0),
-                RGBColorRequest(r: 0, g: 0, b: 255),
-                RGBColorRequest(r: 255, g: 255, b: 255),
-                RGBColorRequest(r: 0, g: 0, b: 0)
+                LightbarRequest(r: 255, g: 0, b: 0, brightness: 1),
+                LightbarRequest(r: 0, g: 255, b: 0, brightness: 1),
+                LightbarRequest(r: 0, g: 0, b: 255, brightness: 1),
+                LightbarRequest(r: 255, g: 255, b: 255, brightness: 1),
+                LightbarRequest(r: 0, g: 0, b: 0, brightness: 1)
             ]
             for color in colors {
-                _ = lightService.setColor(color)
+                _ = lightService.setLightbar(color)
                 eventBus.publish(BridgeEvent(type: "test.light.rgb", payload: [
-                    "r": "\(color.r)",
-                    "g": "\(color.g)",
-                    "b": "\(color.b)"
+                    "r": "\(color.r ?? 0)",
+                    "g": "\(color.g ?? 0)",
+                    "b": "\(color.b ?? 0)"
                 ]))
                 Thread.sleep(forTimeInterval: 0.45)
             }
             for mask in [UInt8(1), 2, 4, 8, 16, 31, 0] {
-                let ok = controllerService.setPlayerLEDs(mask: mask)
+                let ok = lightService.setPlayerLEDs(PlayerLEDRequest(mask: mask, brightness: lightService.state().playerLEDs.brightness))
                 eventBus.publish(BridgeEvent(type: "test.light.playerLEDs", payload: [
                     "mask": "\(mask)",
                     "ok": "\(ok)"
@@ -451,6 +491,12 @@ final class APIServer: @unchecked Sendable {
                 <label><input type="checkbox" class="playerCheck" value="2">灯 2</label>
                 <label><input type="checkbox" class="playerCheck" value="4">灯 3</label>
               </div>
+              <div class="actions" style="margin-top:10px">
+                <button id="probePlayerLEDs">扫描状态灯亮度 0...255</button>
+                <button id="stopLightAnimation">停止灯光动画</button>
+                <button id="startLightbarBreathing">警灯线性呼吸</button>
+              </div>
+              <pre id="lightProbe"></pre>
             </section>
             <section>
               <h2>马达与扳机</h2>
@@ -493,6 +539,14 @@ final class APIServer: @unchecked Sendable {
             <section>
               <h2>事件</h2>
               <pre id="events"></pre>
+            </section>
+            <section>
+              <h2>音频与虚拟设备</h2>
+              <div class="actions">
+                <button id="refreshAudio">刷新音频设备</button>
+                <button id="driverGuide">虚拟驱动安装指引</button>
+              </div>
+              <pre id="audio"></pre>
             </section>
           </main>
           <script>
@@ -553,7 +607,7 @@ final class APIServer: @unchecked Sendable {
           }
           let rumbleTimer = null;
           let triggerTimer = null;
-          let currentPlayerMask = 0;
+          var currentPlayerMask = 0;
           function rangeNumber(id) { return Number(document.querySelector("#" + id).value); }
           function updateValue(id) {
             const input = document.querySelector("#" + id);
@@ -564,6 +618,26 @@ final class APIServer: @unchecked Sendable {
             const input = document.querySelector("#" + id);
             input.addEventListener("input", () => updateValue(id));
             updateValue(id);
+          }
+          function setRange(id, value) {
+            const input = document.querySelector("#" + id);
+            input.value = String(value);
+            updateValue(id);
+          }
+          async function loadLightingState() {
+            const state = await fetch("/v1/light/state", {headers: authHeaders()}).then(r => r.json()).catch(() => null);
+            if (!state) return;
+            const lb = state.lightbar || {};
+            const leds = state.playerLEDs || {};
+            const mic = state.micLED || {};
+            currentPlayerMask = Number(leds.mask || 0);
+            setRange("lightbarBrightness", Number(lb.brightness ?? 1));
+            setRange("playerBrightness", Number(leds.brightness ?? 0));
+            document.querySelector("#lightbarColor").value = "#" + [lb.r ?? 0, lb.g ?? 255, lb.b ?? 0].map(v => Number(v).toString(16).padStart(2, "0")).join("");
+            document.querySelector("#micLEDMode").value = mic.mode || "off";
+            document.querySelectorAll(".playerCheck").forEach(el => {
+              el.checked = (currentPlayerMask & Number(el.value)) !== 0;
+            });
           }
           async function sendRumble(heavy, light, durationMs = 0) {
             await fetch("/v1/haptics/rumble", {
@@ -629,6 +703,10 @@ final class APIServer: @unchecked Sendable {
               body: JSON.stringify({r, g, b, brightness})
             });
           }
+          async function refreshAudio() {
+            const data = await fetch("/v1/audio/devices", {headers: authHeaders()}).then(r => r.json()).catch(error => ({error: String(error)}));
+            document.querySelector("#audio").textContent = JSON.stringify(data, null, 2);
+          }
           ["heavyRumble","lightRumble","playerBrightness","lightbarBrightness","leftTriggerStart","leftTriggerEnd","leftTriggerStrength","leftTriggerFrequency","rightTriggerStart","rightTriggerEnd","rightTriggerStrength","rightTriggerFrequency"].forEach(bindValue);
           ["heavyRumble","lightRumble"].forEach(id => {
             document.querySelector("#" + id).addEventListener("input", () => {
@@ -665,6 +743,36 @@ final class APIServer: @unchecked Sendable {
             if (event.target.id === "sequence") {
               await fetch("/v1/test/light-sequence", {method:"POST", headers: authHeaders()});
             }
+            if (event.target.id === "probePlayerLEDs") {
+              const result = await fetch("/v1/light/player-leds/probe", {
+                method:"POST",
+                headers: authHeaders({"Content-Type":"application/json"}),
+                body: JSON.stringify({mask: currentPlayerMask || 4, start: 0, end: 255, step: 16, dwellMs: 80})
+              }).then(r => r.json());
+              document.querySelector("#lightProbe").textContent = JSON.stringify(result, null, 2);
+            }
+            if (event.target.id === "startLightbarBreathing") {
+              await fetch("/v1/light/animation", {
+                method:"POST",
+                headers: authHeaders({"Content-Type":"application/json"}),
+                body: JSON.stringify({enabled:true, target:"lightbar", periodMs:1600})
+              });
+            }
+            if (event.target.id === "stopLightAnimation") {
+              await fetch("/v1/light/animation", {
+                method:"POST",
+                headers: authHeaders({"Content-Type":"application/json"}),
+                body: JSON.stringify({enabled:false})
+              });
+              await sendLightbar();
+            }
+            if (event.target.id === "refreshAudio") {
+              await refreshAudio();
+            }
+            if (event.target.id === "driverGuide") {
+              const guide = await fetch("/v1/audio/driver/install-guide", {method:"POST", headers: authHeaders()}).then(r => r.json());
+              document.querySelector("#audio").textContent = JSON.stringify(guide, null, 2);
+            }
             if (event.target.id === "stopRumble") {
               document.querySelector("#heavyRumble").value = "0";
               document.querySelector("#lightRumble").value = "0";
@@ -691,7 +799,9 @@ final class APIServer: @unchecked Sendable {
             refreshStatus();
           });
           renderButtons();
+          loadLightingState();
           refreshStatus();
+          refreshAudio();
           loadRecent();
           connectEvents();
           setInterval(refreshStatus, 1500);
