@@ -69,10 +69,7 @@ final class LightService: @unchecked Sendable {
             lightingState = next
             return next
         }
-        return controllerService?.setPlayerLEDs(
-            mask: newState.playerLEDs.mask,
-            brightness: newState.playerLEDs.brightness
-        ) ?? false
+        return controllerService?.setPlayerLEDs(mask: newState.playerLEDs.mask, brightness: nil) ?? false
     }
 
     @discardableResult
@@ -102,13 +99,12 @@ final class LightService: @unchecked Sendable {
 
     func resetEffects() {
         animationWorkItem?.cancel()
-        let brightness = queue.sync { () -> UInt8 in
+        queue.sync {
             lightingState.animation.enabled = false
             lightingState.playerLEDs.mask = 0
             lightingState.micLED.mode = .off
-            return lightingState.playerLEDs.brightness
         }
-        _ = controllerService?.setPlayerLEDs(mask: 0, brightness: brightness)
+        _ = controllerService?.setPlayerLEDs(mask: 0, brightness: nil)
         _ = controllerService?.setMicMuteLED(MicMuteLEDRequest(on: nil, mode: .off))
     }
 
@@ -144,7 +140,7 @@ final class LightService: @unchecked Sendable {
     private func applyCurrentState() -> Bool {
         let current = state()
         let lightbarOK = applyLightbar(current.lightbar)
-        let playerOK = controllerService?.setPlayerLEDs(mask: current.playerLEDs.mask, brightness: current.playerLEDs.brightness) ?? false
+        let playerOK = controllerService?.setPlayerLEDs(mask: current.playerLEDs.mask, brightness: nil) ?? false
         let micOK = controllerService?.setMicMuteLED(MicMuteLEDRequest(on: nil, mode: current.micLED.mode)) ?? false
         return lightbarOK || playerOK || micOK
     }

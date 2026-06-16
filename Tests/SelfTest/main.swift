@@ -139,6 +139,8 @@ struct SelfTest {
         expect(outputReport.count == 78, "player LED output report should use bluetooth report size")
         expect(outputReport[0] == 0x31, "player LED output report should use bluetooth output report id")
         expect((outputReport[4] & 0x10) != 0, "player LED output report should enable player indicator control")
+        expect((outputReport[41] & 0x01) == 0, "plain player LED output should not set brightness control")
+        expect(outputReport[45] == 0, "plain player LED output should not write brightness")
         expect(outputReport[46] == 0x1f, "player LED output report should include masked LED value")
         expect(outputReport[5] == 0 && outputReport[6] == 0, "player LED output report should not set motor bytes")
 

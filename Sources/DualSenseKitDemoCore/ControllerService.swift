@@ -85,7 +85,9 @@ final class ControllerService: @unchecked Sendable {
     func setRumble(_ request: RumbleRequest) -> Bool {
         let heavy = request.heavy ?? request.left ?? 0
         let light = request.light ?? request.right ?? 0
-        return hidService.setRumble(left: heavy, right: light, durationMs: request.durationMs)
+        // On DualSense HID output reports, the byte named "right motor" is the strong/heavy
+        // actuator on the hardware we are targeting; expose the UI in hardware terms.
+        return hidService.setRumble(left: light, right: heavy, durationMs: request.durationMs)
     }
 
     func setMicMuteLED(on: Bool) -> Bool {

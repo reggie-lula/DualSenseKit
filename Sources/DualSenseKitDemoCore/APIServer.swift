@@ -474,7 +474,7 @@ final class APIServer: @unchecked Sendable {
                 <button data-mask="0">全灭</button>
               </div>
               <div class="control-grid" style="margin-top:10px">
-                <label>状态灯亮度 <span id="playerBrightnessValue">0</span><input id="playerBrightness" type="range" min="0" max="2" step="1" value="0"></label>
+                <label>状态灯亮度 <span id="playerBrightnessValue">硬件未确认</span><input id="playerBrightness" type="range" min="0" max="2" step="1" value="0" disabled></label>
                 <label>警灯亮度 <span id="lightbarBrightnessValue">1.00</span><input id="lightbarBrightness" type="range" min="0" max="1" step="0.01" value="1"></label>
                 <label>静音灯
                   <select id="micLEDMode">
@@ -605,8 +605,9 @@ final class APIServer: @unchecked Sendable {
             ws.onmessage = message => addEvent(JSON.parse(message.data));
             ws.onclose = () => setTimeout(connectEvents, 1000);
           }
-          let rumbleTimer = null;
-          let triggerTimer = null;
+          var rumbleTimer = null;
+          var rumbleHolding = false;
+          var triggerTimer = null;
           var currentPlayerMask = 0;
           function rangeNumber(id) { return Number(document.querySelector("#" + id).value); }
           function updateValue(id) {
@@ -632,7 +633,6 @@ final class APIServer: @unchecked Sendable {
             const mic = state.micLED || {};
             currentPlayerMask = Number(leds.mask || 0);
             setRange("lightbarBrightness", Number(lb.brightness ?? 1));
-            setRange("playerBrightness", Number(leds.brightness ?? 0));
             document.querySelector("#lightbarColor").value = "#" + [lb.r ?? 0, lb.g ?? 255, lb.b ?? 0].map(v => Number(v).toString(16).padStart(2, "0")).join("");
             document.querySelector("#micLEDMode").value = mic.mode || "off";
             document.querySelectorAll(".playerCheck").forEach(el => {
@@ -677,7 +677,7 @@ final class APIServer: @unchecked Sendable {
             await fetch("/v1/light/player-leds", {
               method:"PUT",
               headers: authHeaders({"Content-Type":"application/json"}),
-              body: JSON.stringify({mask, brightness: Number(document.querySelector("#playerBrightness").value)})
+              body: JSON.stringify({mask})
             });
           }
           async function sendPlayerChecks() {
@@ -707,11 +707,31 @@ final class APIServer: @unchecked Sendable {
             const data = await fetch("/v1/audio/devices", {headers: authHeaders()}).then(r => r.json()).catch(error => ({error: String(error)}));
             document.querySelector("#audio").textContent = JSON.stringify(data, null, 2);
           }
-          ["heavyRumble","lightRumble","playerBrightness","lightbarBrightness","leftTriggerStart","leftTriggerEnd","leftTriggerStrength","leftTriggerFrequency","rightTriggerStart","rightTriggerEnd","rightTriggerStrength","rightTriggerFrequency"].forEach(bindValue);
+          ["heavyRumble","lightRumble","lightbarBrightness","leftTriggerStart","leftTriggerEnd","leftTriggerStrength","leftTriggerFrequency","rightTriggerStart","rightTriggerEnd","rightTriggerStrength","rightTriggerFrequency"].forEach(bindValue);
+          function sendRumbleFromSliders(durationMs) {
+            return sendRumble(rangeNumber("heavyRumble"), rangeNumber("lightRumble"), durationMs);
+          }
+          async function stopRumbleFromSliders() {
+            clearTimeout(rumbleTimer);
+            rumbleHolding = false;
+            await sendRumble(0, 0, 0);
+          }
           ["heavyRumble","lightRumble"].forEach(id => {
-            document.querySelector("#" + id).addEventListener("input", () => {
+            const input = document.querySelector("#" + id);
+            input.addEventListener("pointerdown", () => {
+              rumbleHolding = true;
               clearTimeout(rumbleTimer);
-              rumbleTimer = setTimeout(() => sendRumble(rangeNumber("heavyRumble"), rangeNumber("lightRumble"), 1000), 80);
+              sendRumbleFromSliders(0);
+            });
+            input.addEventListener("input", () => {
+              clearTimeout(rumbleTimer);
+              const duration = rumbleHolding ? 0 : 1000;
+              rumbleTimer = setTimeout(() => sendRumbleFromSliders(duration), 40);
+            });
+            input.addEventListener("pointerup", stopRumbleFromSliders);
+            input.addEventListener("pointercancel", stopRumbleFromSliders);
+            input.addEventListener("lostpointercapture", () => {
+              if (rumbleHolding) stopRumbleFromSliders();
             });
           });
           ["leftTriggerMode","rightTriggerMode"].forEach(id => {
@@ -723,7 +743,6 @@ final class APIServer: @unchecked Sendable {
               triggerTimer = setTimeout(sendTriggers, 80);
             });
           });
-          document.querySelector("#playerBrightness").addEventListener("input", () => sendPlayerMask(currentPlayerMask));
           document.querySelector("#lightbarBrightness").addEventListener("input", sendLightbar);
           document.querySelector("#lightbarColor").addEventListener("input", sendLightbar);
           document.querySelector("#micLEDMode").addEventListener("change", sendMicLED);
