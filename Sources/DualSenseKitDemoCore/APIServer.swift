@@ -155,7 +155,7 @@ final class APIServer: @unchecked Sendable {
                     send(status: 400, json: ["error": "invalid_player_led_mask"], connection: connection)
                     return
                 }
-                let ok = controllerService.setPlayerLEDs(mask: request.mask, brightness: request.brightness)
+                let ok = controllerService.setPlayerLEDs(mask: request.mask)
                 send(status: ok ? 200 : 409, json: ["ok": "\(ok)"], connection: connection)
             } catch {
                 send(status: 400, json: ["error": "invalid_player_led_request"], connection: connection)
@@ -173,7 +173,7 @@ final class APIServer: @unchecked Sendable {
         case ("PUT", "/v1/light/lightbar"):
             do {
                 let request = try JSONDecoder().decode(LightbarRequest.self, from: request.body)
-                let ok = controllerService.setLightbar(request)
+                let ok = lightService.setLightbar(request)
                 send(status: ok ? 200 : 409, json: ["ok": "\(ok)"], connection: connection)
             } catch {
                 send(status: 400, json: ["error": "invalid_lightbar_request"], connection: connection)
@@ -434,7 +434,7 @@ final class APIServer: @unchecked Sendable {
                 <button data-mask="0">全灭</button>
               </div>
               <div class="control-grid" style="margin-top:10px">
-                <label>状态灯亮度 <span id="playerBrightnessValue">0</span><input id="playerBrightness" type="range" min="0" max="2" step="1" value="0"></label>
+                <label>状态灯亮度 <span id="playerBrightnessValue">硬件未确认</span><input id="playerBrightness" type="range" min="0" max="2" step="1" value="0" disabled></label>
                 <label>警灯亮度 <span id="lightbarBrightnessValue">1.00</span><input id="lightbarBrightness" type="range" min="0" max="1" step="0.01" value="1"></label>
                 <label>静音灯
                   <select id="micLEDMode">
@@ -551,9 +551,9 @@ final class APIServer: @unchecked Sendable {
             ws.onmessage = message => addEvent(JSON.parse(message.data));
             ws.onclose = () => setTimeout(connectEvents, 1000);
           }
-          let rumbleTimer = null;
-          let triggerTimer = null;
-          let currentPlayerMask = 0;
+          var rumbleTimer = null;
+          var triggerTimer = null;
+          var currentPlayerMask = 0;
           function rangeNumber(id) { return Number(document.querySelector("#" + id).value); }
           function updateValue(id) {
             const input = document.querySelector("#" + id);
@@ -603,7 +603,7 @@ final class APIServer: @unchecked Sendable {
             await fetch("/v1/light/player-leds", {
               method:"PUT",
               headers: authHeaders({"Content-Type":"application/json"}),
-              body: JSON.stringify({mask, brightness: Number(document.querySelector("#playerBrightness").value)})
+              body: JSON.stringify({mask})
             });
           }
           async function sendPlayerChecks() {
@@ -629,7 +629,7 @@ final class APIServer: @unchecked Sendable {
               body: JSON.stringify({r, g, b, brightness})
             });
           }
-          ["heavyRumble","lightRumble","playerBrightness","lightbarBrightness","leftTriggerStart","leftTriggerEnd","leftTriggerStrength","leftTriggerFrequency","rightTriggerStart","rightTriggerEnd","rightTriggerStrength","rightTriggerFrequency"].forEach(bindValue);
+          ["heavyRumble","lightRumble","lightbarBrightness","leftTriggerStart","leftTriggerEnd","leftTriggerStrength","leftTriggerFrequency","rightTriggerStart","rightTriggerEnd","rightTriggerStrength","rightTriggerFrequency"].forEach(bindValue);
           ["heavyRumble","lightRumble"].forEach(id => {
             document.querySelector("#" + id).addEventListener("input", () => {
               clearTimeout(rumbleTimer);
@@ -645,7 +645,6 @@ final class APIServer: @unchecked Sendable {
               triggerTimer = setTimeout(sendTriggers, 80);
             });
           });
-          document.querySelector("#playerBrightness").addEventListener("input", () => sendPlayerMask(currentPlayerMask));
           document.querySelector("#lightbarBrightness").addEventListener("input", sendLightbar);
           document.querySelector("#lightbarColor").addEventListener("input", sendLightbar);
           document.querySelector("#micLEDMode").addEventListener("change", sendMicLED);
