@@ -54,6 +54,10 @@ final class ControllerService: @unchecked Sendable {
         hidService.recentRawReports(limit: limit)
     }
 
+    func hidAudioStatus() -> HIDAudioStatusResponse {
+        hidService.hidAudioStatus()
+    }
+
     init(eventBus: EventBus, configStore: ConfigStore, actionExecutor: ActionExecutor) {
         self.eventBus = eventBus
         self.configStore = configStore
@@ -96,6 +100,22 @@ final class ControllerService: @unchecked Sendable {
 
     func setAudioVolume(_ request: AudioVolumeRequest) -> Bool {
         hidService.setAudioVolume(headphone: request.headphone, speaker: request.speaker)
+    }
+
+    func setHIDAudioTestTone(_ request: HIDAudioTestToneRequest) -> Bool {
+        hidService.setHIDTestTone(
+            target: request.target,
+            enabled: request.enabled,
+            durationMs: request.durationMs
+        )
+    }
+
+    func startHIDCapture(_ request: HIDCaptureStartRequest) -> HIDCaptureResponse {
+        hidService.startCapture(durationMs: request.durationMs)
+    }
+
+    func stopHIDCapture() -> HIDCaptureResponse {
+        hidService.stopCapture()
     }
 
     func setMicMuteLED(on: Bool) -> Bool {

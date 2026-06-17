@@ -31,6 +31,12 @@ final class DualSenseHIDService: @unchecked Sendable {
     private var outputSequence: UInt8 = 0
     private var outputState = DualSenseOutputState()
     private var rumbleStopWorkItem: DispatchWorkItem?
+    private var toneStopWorkItem: DispatchWorkItem?
+    private var lastAudioStatus: DualSenseAudioStatus?
+    private var captureStartedAt: Date?
+    private var captureStoppedAt: Date?
+    private var captureReports: [RawHIDReport] = []
+    private var captureStopWorkItem: DispatchWorkItem?
 
     init(
         buttonUpdate: @escaping ButtonUpdate,
@@ -92,6 +98,13 @@ final class DualSenseHIDService: @unchecked Sendable {
             isOpen = false
             rumbleStopWorkItem?.cancel()
             rumbleStopWorkItem = nil
+            toneStopWorkItem?.cancel()
+            toneStopWorkItem = nil
+            captureStopWorkItem?.cancel()
+            captureStopWorkItem = nil
+            captureStartedAt = nil
+            captureStoppedAt = nil
+            captureReports.removeAll()
             statusText = "stopped"
         }
     }
@@ -113,6 +126,34 @@ final class DualSenseHIDService: @unchecked Sendable {
     func recentRawReports(limit: Int = 20) -> [RawHIDReport] {
         queue.sync {
             Array(rawReports.suffix(max(0, min(limit, maxRawReports))))
+        }
+    }
+
+    func hidAudioStatus() -> HIDAudioStatusResponse {
+        queue.sync {
+            let diagnostics = HIDDiagnostics(
+                connected: device != nil,
+                writable: isOpen,
+                product: stringProperty(kIOHIDProductKey),
+                vendorID: intProperty(kIOHIDVendorIDKey),
+                productID: intProperty(kIOHIDProductIDKey),
+                transport: stringProperty(kIOHIDTransportKey),
+                status: statusText
+            )
+            let reliability = audioStatusReliability(transport: diagnostics.transport, status: lastAudioStatus)
+            return HIDAudioStatusResponse(
+                hidConnected: diagnostics.connected,
+                hidWritable: diagnostics.writable,
+                transport: diagnostics.transport,
+                headphoneDetected: lastAudioStatus?.headphoneDetected,
+                microphoneDetected: lastAudioStatus?.microphoneDetected,
+                micMuted: lastAudioStatus?.micMuted,
+                rawStatus0: lastAudioStatus.map { String(format: "%02x", $0.rawStatus0) },
+                rawStatus1: lastAudioStatus.map { String(format: "%02x", $0.rawStatus1) },
+                sourceConnection: lastAudioStatus.map { "\($0.sourceConnection)" },
+                reliability: reliability,
+                message: audioStatusMessage(reliability: reliability)
+            )
         }
     }
 
@@ -188,6 +229,81 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
+    func setHIDTestTone(target: HIDAudioTarget, enabled: Bool, durationMs: Int?) -> Bool {
+        let safeDuration = max(0, min(durationMs ?? 0, 10_000))
+        let sdkTarget: DualSenseAudioOutputTarget = target == .speaker ? .speaker : .headphone
+        let ok = queue.sync {
+            toneStopWorkItem?.cancel()
+            toneStopWorkItem = nil
+            guard let device, isOpen else {
+                statusText = "hid_not_open"
+                return false
+            }
+            let connection = connectionType()
+            let commands = DualSenseProtocol.featureReportCommands(
+                for: .waveOut(target: sdkTarget, enabled: enabled),
+                connection: connection
+            )
+            var lastResult: IOReturn = kIOReturnSuccess
+            for command in commands {
+                lastResult = sendFeatureReport(command, device: device)
+                guard lastResult == kIOReturnSuccess else {
+                    statusText = "hid_test_tone_failed_\(String(format: "%08x", lastResult))"
+                    return false
+                }
+            }
+            statusText = enabled ? "hid_test_tone_\(target.rawValue)_on" : "hid_test_tone_off"
+            return true
+        }
+        if ok, enabled, safeDuration > 0 {
+            let workItem = DispatchWorkItem { [weak self] in
+                _ = self?.setHIDTestTone(target: target, enabled: false, durationMs: nil)
+            }
+            queue.sync { toneStopWorkItem = workItem }
+            DispatchQueue.global(qos: .utility).asyncAfter(
+                deadline: .now() + .milliseconds(safeDuration),
+                execute: workItem
+            )
+        }
+        return ok
+    }
+
+    func startCapture(durationMs: Int?) -> HIDCaptureResponse {
+        let safeDuration = max(0, min(durationMs ?? 0, 30_000))
+        let response = queue.sync {
+            captureStopWorkItem?.cancel()
+            captureStartedAt = Date()
+            captureStoppedAt = nil
+            captureReports.removeAll()
+            statusText = "hid_capture_started"
+            return captureResponse(active: true, message: "HID capture started.")
+        }
+        if safeDuration > 0 {
+            let workItem = DispatchWorkItem { [weak self] in
+                _ = self?.stopCapture()
+            }
+            queue.sync { captureStopWorkItem = workItem }
+            DispatchQueue.global(qos: .utility).asyncAfter(
+                deadline: .now() + .milliseconds(safeDuration),
+                execute: workItem
+            )
+        }
+        return response
+    }
+
+    func stopCapture() -> HIDCaptureResponse {
+        queue.sync {
+            captureStopWorkItem?.cancel()
+            captureStopWorkItem = nil
+            if captureStartedAt != nil, captureStoppedAt == nil {
+                captureStoppedAt = Date()
+            }
+            statusText = "hid_capture_stopped"
+            return captureResponse(active: false, message: "HID capture stopped. No PCM conclusion is assumed from this snapshot.")
+        }
+    }
+
+    @discardableResult
     func setMicMuteLED(on: Bool) -> Bool {
         setMicMuteLED(control: on ? 1 : 0)
     }
@@ -240,6 +356,10 @@ final class DualSenseHIDService: @unchecked Sendable {
 
     static func parseSpecialButtons(report: Data) -> UInt8? {
         DualSenseProtocol.specialButtonsByte(from: report)
+    }
+
+    static func parseAudioStatus(report: Data) -> DualSenseAudioStatus? {
+        DualSenseProtocol.parseAudioStatus(from: report)
     }
 
     fileprivate static func parseInputReport(_ report: Data) -> DualSenseInputReport? {
@@ -318,11 +438,39 @@ final class DualSenseHIDService: @unchecked Sendable {
         if rawReports.count > maxRawReports {
             rawReports.removeFirst(rawReports.count - maxRawReports)
         }
+        if captureStartedAt != nil, captureStoppedAt == nil {
+            captureReports.append(RawHIDReport(
+                reportID: reportID,
+                length: data.count,
+                hex: data.map { String(format: "%02x", $0) }.joined(separator: " "),
+                timestamp: Date()
+            ))
+            if captureReports.count > 300 {
+                captureReports.removeFirst(captureReports.count - 300)
+            }
+        }
         guard let parsed = Self.parseInputReport(data) else { return }
+        emitAudioStatus(parsed)
         emitAxes(parsed)
         emitMotion(parsed)
         emitButtons(parsed)
         emitTouch(parsed)
+    }
+
+    private func emitAudioStatus(_ report: DualSenseInputReport) {
+        guard let status = report.audioStatus else { return }
+        let old = lastAudioStatus
+        lastAudioStatus = status
+        guard old != status else { return }
+        outputEvent?(BridgeEvent(type: "hid.audio.status", payload: [
+            "headphoneDetected": "\(status.headphoneDetected)",
+            "microphoneDetected": "\(status.microphoneDetected)",
+            "micMuted": "\(status.micMuted)",
+            "rawStatus0": String(format: "%02x", status.rawStatus0),
+            "rawStatus1": String(format: "%02x", status.rawStatus1),
+            "sourceConnection": "\(status.sourceConnection)",
+            "reliability": audioStatusReliability(transport: stringProperty(kIOHIDTransportKey), status: status)
+        ]))
     }
 
     private func emitAxes(_ report: DualSenseInputReport) {
@@ -467,6 +615,63 @@ final class DualSenseHIDService: @unchecked Sendable {
         return lastResult
     }
 
+    private func sendFeatureReport(_ command: DualSenseFeatureReportCommand, device: IOHIDDevice) -> IOReturn {
+        outputEvent?(BridgeEvent(type: "hid.feature.request", payload: [
+            "intent": "audioTestTone",
+            "command": command.name,
+            "reportID": String(format: "%02x", command.reportID),
+            "reportLength": "\(command.payload.count)",
+            "reportBytesHexPrefix": command.payload.hexPrefix(count: 24)
+        ]))
+        var fullReport = Data([command.reportID])
+        fullReport.append(command.payload)
+        let attempts: [(IOHIDReportType, CFIndex, Data, String)] = [
+            (kIOHIDReportTypeFeature, CFIndex(command.reportID), command.payload, "feature_payload"),
+            (kIOHIDReportTypeFeature, CFIndex(command.reportID), fullReport, "feature_full"),
+            (kIOHIDReportTypeFeature, 0, fullReport, "feature_zero_full")
+        ]
+        var lastResult: IOReturn = kIOReturnError
+        var failures: [String] = []
+        for (type, reportID, data, name) in attempts {
+            let result = data.withUnsafeBytes { buffer -> IOReturn in
+                guard let base = buffer.baseAddress else { return kIOReturnBadArgument }
+                return IOHIDDeviceSetReport(
+                    device,
+                    type,
+                    reportID,
+                    base.assumingMemoryBound(to: UInt8.self),
+                    data.count
+                )
+            }
+            if result == kIOReturnSuccess {
+                statusText = "feature_report_sent_via_\(name)"
+                outputEvent?(BridgeEvent(type: "hid.feature.success", payload: [
+                    "intent": "audioTestTone",
+                    "command": command.name,
+                    "attempt": name,
+                    "reportID": "\(reportID)",
+                    "length": "\(data.count)",
+                    "result": String(format: "%08x", result),
+                    "ok": "true",
+                    "status": statusText
+                ]))
+                return result
+            }
+            failures.append("\(name)=\(String(format: "%08x", result))")
+            lastResult = result
+        }
+        statusText = "feature_report_failed_\(failures.joined(separator: ","))"
+        outputEvent?(BridgeEvent(type: "hid.feature.failure", payload: [
+            "intent": "audioTestTone",
+            "command": command.name,
+            "failures": failures.joined(separator: ","),
+            "lastResult": String(format: "%08x", lastResult),
+            "ok": "false",
+            "status": statusText
+        ]))
+        return lastResult
+    }
+
     private func nextOutputSequence() -> UInt8 {
         let current = outputSequence & 0x0f
         outputSequence = (outputSequence + 1) & 0x0f
@@ -503,6 +708,73 @@ final class DualSenseHIDService: @unchecked Sendable {
         guard let device,
               let value = IOHIDDeviceGetProperty(device, key as CFString) else { return nil }
         return (value as? NSNumber)?.intValue
+    }
+
+    private func connectionType() -> DualSenseConnection {
+        let transport = stringProperty(kIOHIDTransportKey)?.lowercased() ?? ""
+        return transport.contains("bluetooth") ? .bluetooth : .usb
+    }
+
+    private func audioStatusReliability(transport: String?, status: DualSenseAudioStatus?) -> String {
+        guard status != nil else { return "waiting_for_input_report" }
+        let transportValue = (transport ?? "").lowercased()
+        if transportValue.contains("usb") { return "usb_status_bits" }
+        if transportValue.contains("bluetooth") { return "bluetooth_status_bits_experimental" }
+        return "unknown_transport_experimental"
+    }
+
+    private func audioStatusMessage(reliability: String) -> String {
+        switch reliability {
+        case "usb_status_bits":
+            return "USB status bits are available for jack and microphone diagnostics."
+        case "bluetooth_status_bits_experimental":
+            return "Bluetooth status bits are parsed for diagnostics only; they do not prove microphone PCM transport."
+        case "waiting_for_input_report":
+            return "Waiting for a DualSense HID input report before audio status can be shown."
+        default:
+            return "Audio status is experimental on this transport."
+        }
+    }
+
+    private func captureResponse(active: Bool, message: String) -> HIDCaptureResponse {
+        let reports = captureReports
+        let uniqueIDs = Array(Set(reports.map(\.reportID))).sorted()
+        return HIDCaptureResponse(
+            active: active,
+            startedAt: captureStartedAt,
+            stoppedAt: captureStoppedAt,
+            reportCount: reports.count,
+            uniqueReportIDs: uniqueIDs,
+            byteChangeSummary: byteChangeSummary(reports: reports),
+            pcmEvidence: pcmEvidence(reports: reports),
+            message: message,
+            reports: Array(reports.suffix(30))
+        )
+    }
+
+    private func byteChangeSummary(reports: [RawHIDReport]) -> [String] {
+        guard reports.count >= 2 else { return [] }
+        let parsedReports = reports.map { $0.hex.split(separator: " ").compactMap { UInt8($0, radix: 16) } }
+        let maxLength = parsedReports.map(\.count).max() ?? 0
+        var summaries: [String] = []
+        for index in 0..<maxLength {
+            let values = Set(parsedReports.compactMap { index < $0.count ? $0[index] : nil })
+            if values.count > 1 {
+                let sample = values.sorted().prefix(8).map { String(format: "%02x", $0) }.joined(separator: "/")
+                summaries.append("[\(index)]=\(sample)")
+            }
+            if summaries.count >= 40 { break }
+        }
+        return summaries
+    }
+
+    private func pcmEvidence(reports: [RawHIDReport]) -> String {
+        guard reports.count >= 10 else { return "insufficient_reports" }
+        let lengths = Set(reports.map(\.length))
+        if lengths.count == 1, let length = lengths.first, length <= inputBufferSize {
+            return "no_large_audio_payload_detected"
+        }
+        return "unknown_requires_manual_review"
     }
 
     private func clamp01(_ value: Float) -> Float {

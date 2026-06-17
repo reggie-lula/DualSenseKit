@@ -70,6 +70,14 @@ struct SelfTest {
         let decodedSystemVolume = try JSONDecoder().decode(SystemVolumeRequest.self, from: try JSONEncoder().encode(systemVolume))
         expect(decodedSystemVolume == systemVolume, "SystemVolumeRequest should round-trip through JSON")
 
+        let testTone = HIDAudioTestToneRequest(target: .speaker, enabled: true, durationMs: 3000)
+        let decodedTestTone = try JSONDecoder().decode(HIDAudioTestToneRequest.self, from: try JSONEncoder().encode(testTone))
+        expect(decodedTestTone == testTone, "HIDAudioTestToneRequest should round-trip through JSON")
+
+        let captureStart = HIDCaptureStartRequest(durationMs: 5000)
+        let decodedCaptureStart = try JSONDecoder().decode(HIDCaptureStartRequest.self, from: try JSONEncoder().encode(captureStart))
+        expect(decodedCaptureStart == captureStart, "HIDCaptureStartRequest should round-trip through JSON")
+
         let audioDevices = AudioDevicesResponse(
             inputs: [],
             outputs: [],
@@ -179,6 +187,8 @@ struct SelfTest {
         fullInput[30] = 0x56
         fullInput[31] = 0x34
         fullInput[32] = 0x12
+        fullInput[54] = 0x9a
+        fullInput[55] = 0x07
         expect(DualSenseHIDService.parseSpecialButtons(report: fullInput) == 0x07, "full input special bits should parse")
         let parsedInput = DualSenseProtocol.parseInputReport(fullInput)
         expect(parsedInput?.motion?.gyroX == 0x1234, "gyro x should parse as little-endian Int16")
@@ -188,6 +198,12 @@ struct SelfTest {
         expect(parsedInput?.motion?.accelY == 2, "accel y should parse signed Int16")
         expect(parsedInput?.motion?.accelZ == -256, "accel z should parse signed Int16")
         expect(parsedInput?.motion?.timestamp == 0x12345678, "motion timestamp should parse little-endian UInt32")
+        expect(parsedInput?.audioStatus?.rawStatus0 == 0x9a, "audio status0 should parse at DualSense status offset")
+        expect(parsedInput?.audioStatus?.rawStatus1 == 0x07, "audio status1 should parse at DualSense status offset")
+        expect(parsedInput?.audioStatus?.headphoneDetected == true, "headphone detect bit should parse")
+        expect(parsedInput?.audioStatus?.microphoneDetected == true, "microphone detect bit should parse")
+        expect(parsedInput?.audioStatus?.micMuted == true, "mic mute status bit should parse")
+        expect(parsedInput?.audioStatus?.sourceConnection == .bluetooth, "bluetooth input should mark audio status source")
 
         let outputReport = DualSenseHIDService.bluetoothOutputReport(playerLEDMask: 0x1f)
         expect(outputReport.count == 78, "player LED output report should use bluetooth report size")
@@ -211,6 +227,31 @@ struct SelfTest {
         expect(audioVolumeReport[8] == 217, "audio volume report should set speaker volume byte")
         expect(audioVolumeReport[5] == 0 && audioVolumeReport[6] == 0, "audio volume report should not set motor bytes")
         expect(audioVolumeReport[46] == 0, "audio volume report should not set player LED bytes")
+
+        let speakerWave = DualSenseProtocol.featureReportCommands(for: .waveOut(target: .speaker, enabled: true), connection: .usb)
+        expect(speakerWave.count == 2, "speaker waveout enable should send setup and control commands")
+        expect(speakerWave[0].reportID == 0x80, "waveout setup should use test command feature report")
+        expect(speakerWave[0].payload.count == DualSenseProtocol.featureReportPayloadSize, "waveout setup payload should use fixed feature report size")
+        expect(speakerWave[0].payload[0] == 0x06, "waveout setup should target audio test device")
+        expect(speakerWave[0].payload[1] == 0x04, "waveout setup should use calibration verify action")
+        expect(speakerWave[0].payload[4] == 0x08, "speaker waveout setup should set speaker parameter")
+        expect(speakerWave[1].payload[1] == 0x02, "waveout control should use waveout action")
+        expect(speakerWave[1].payload[2] == 0x01, "waveout control should enable test tone")
+
+        let headphoneWave = DualSenseProtocol.featureReportCommands(for: .waveOut(target: .headphone, enabled: true), connection: .usb)
+        expect(headphoneWave[0].payload[6] == 0x04, "headphone waveout setup should set headphone parameter 4")
+        expect(headphoneWave[0].payload[8] == 0x06, "headphone waveout setup should set headphone parameter 6")
+
+        let stopWave = DualSenseProtocol.featureReportCommands(for: .waveOut(target: .speaker, enabled: false), connection: .bluetooth)
+        expect(stopWave.count == 1, "waveout disable should only send control command")
+        expect(stopWave[0].payload[1] == 0x02, "waveout disable should use waveout action")
+        expect(stopWave[0].payload[2] == 0x00, "waveout disable should clear enable flag")
+        let expectedCRC = DualSenseProtocol.crc32(bytes: [0x53, 0x80] + Array(stopWave[0].payload.dropLast(4)))
+        let actualCRC = UInt32(stopWave[0].payload[59])
+            | (UInt32(stopWave[0].payload[60]) << 8)
+            | (UInt32(stopWave[0].payload[61]) << 16)
+            | (UInt32(stopWave[0].payload[62]) << 24)
+        expect(actualCRC == expectedCRC, "bluetooth feature report should include CRC32")
 
         _ = AudioService().outputDevices()
 

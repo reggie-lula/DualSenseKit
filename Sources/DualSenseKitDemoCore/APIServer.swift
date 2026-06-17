@@ -247,6 +247,59 @@ final class APIServer: @unchecked Sendable {
                 send(status: 400, json: ["error": "invalid_audio_volume_request"], connection: connection)
             }
 
+        case ("GET", "/v1/audio/hid-status"):
+            let status = controllerService.hidAudioStatus()
+            eventBus.publish(BridgeEvent(type: "audio.hid.status", payload: [
+                "headphoneDetected": status.headphoneDetected.map(String.init) ?? "",
+                "microphoneDetected": status.microphoneDetected.map(String.init) ?? "",
+                "micMuted": status.micMuted.map(String.init) ?? "",
+                "rawStatus0": status.rawStatus0 ?? "",
+                "rawStatus1": status.rawStatus1 ?? "",
+                "reliability": status.reliability
+            ]))
+            sendCodable(status: 200, value: status, connection: connection)
+
+        case ("POST", "/v1/audio/hid-test-tone"):
+            do {
+                let request = try JSONDecoder().decode(HIDAudioTestToneRequest.self, from: request.body)
+                let ok = controllerService.setHIDAudioTestTone(request)
+                eventBus.publish(BridgeEvent(type: ok ? "audio.hid.testTone.sent" : "audio.hid.testTone.failed", payload: [
+                    "target": request.target.rawValue,
+                    "enabled": "\(request.enabled)",
+                    "durationMs": request.durationMs.map(String.init) ?? "",
+                    "message": ok ? "HID test tone command sent." : "HID test tone command failed."
+                ]))
+                send(status: ok ? 200 : 409, json: [
+                    "ok": "\(ok)",
+                    "target": request.target.rawValue,
+                    "enabled": "\(request.enabled)"
+                ], connection: connection)
+            } catch {
+                send(status: 400, json: ["error": "invalid_hid_test_tone_request"], connection: connection)
+            }
+
+        case ("POST", "/v1/audio/hid-capture/start"):
+            do {
+                let request = try JSONDecoder().decode(HIDCaptureStartRequest.self, from: request.body)
+                let result = controllerService.startHIDCapture(request)
+                eventBus.publish(BridgeEvent(type: "audio.hid.capture.started", payload: [
+                    "durationMs": request.durationMs.map(String.init) ?? "",
+                    "message": result.message
+                ]))
+                sendCodable(status: 200, value: result, connection: connection)
+            } catch {
+                send(status: 400, json: ["error": "invalid_hid_capture_request"], connection: connection)
+            }
+
+        case ("POST", "/v1/audio/hid-capture/stop"):
+            let result = controllerService.stopHIDCapture()
+            eventBus.publish(BridgeEvent(type: "audio.hid.capture.stopped", payload: [
+                "reportCount": "\(result.reportCount)",
+                "pcmEvidence": result.pcmEvidence,
+                "message": result.message
+            ]))
+            sendCodable(status: 200, value: result, connection: connection)
+
         case ("PUT", "/v1/audio/system-volume"):
             do {
                 let request = try JSONDecoder().decode(SystemVolumeRequest.self, from: request.body)
@@ -580,10 +633,13 @@ final class APIServer: @unchecked Sendable {
                 <div class="control-row"><label>手柄扬声器音量</label><input id="hidSpeakerVolume" type="range" min="0" max="1" step="0.01" value="0.85"></div>
                 <div class="control-row"><label>手柄耳机音量</label><input id="hidHeadphoneVolume" type="range" min="0" max="1" step="0.01" value="0.65"></div>
                 <div class="control-row"><label>系统输出音量</label><input id="systemOutputVolume" type="range" min="0" max="1" step="0.01" value="0.5"></div>
+                <div id="hidAudioStatus" class="audio-note">HID 音频状态：等待输入报告</div>
+                <div class="control-row compact"><label>测试音目标</label><select id="hidToneTarget"><option value="speaker">扬声器</option><option value="headphone">耳机</option></select></div>
+                <div class="actions"><button id="refreshHIDAudioStatus">刷新 HID 状态</button><button id="speakerTestTone">扬声器测试音</button><button id="headphoneTestTone">耳机测试音</button><button id="stopTestTone">停止测试音</button><button id="startHIDCapture">采样 5 秒</button><button id="stopHIDCapture">停止采样</button></div>
                 <div class="control-row"><label>音频文件路径</label><input id="audioPath" type="text" placeholder="/Users/.../test.wav 或 .mp3/.m4a/.mp4"></div>
                 <div class="actions"><button id="refreshAudio">刷新音频设备</button><button id="playAudioFile">播放文件</button><button id="recordAudio3s">录制 3 秒</button><button id="stopAudioRecord">停止录音</button><button id="playRecordedAudio">播放录音</button></div>
                 <div id="audioRecordStatus" class="audio-note">录音：未开始</div>
-                <div class="audio-note">MVP 只使用 macOS 已暴露的 CoreAudio 端点。蓝牙 HID 不作为 mp3/wav/麦克风 PCM 音频通道；如未检测到 DualSense 音频端点，会使用 Mac fallback 测试链路。</div>
+                <div class="audio-note">文件播放/录音只使用 macOS 已暴露的 CoreAudio 端点。HID 测试音是手柄内置 waveout 测试，不等于 mp3/wav 蓝牙播放；HID 状态探测也不等于麦克风 PCM 录音。</div>
               </section>
 
               <section class="module">
@@ -679,6 +735,7 @@ final class APIServer: @unchecked Sendable {
           function classify(event) {
             if (event.type === "ui.action") return "ui";
             if (event.type && event.type.startsWith("hid.output")) return event.type.endsWith("failure") ? "failure" : "output";
+            if (event.type && event.type.startsWith("hid.feature")) return event.type.endsWith("failure") ? "failure" : "output";
             if (event.type && event.type.startsWith("audio.")) return event.type.includes("failed") ? "failure" : "output";
             if (event.type && (event.type.startsWith("button.") || event.type.startsWith("hid.") || event.type.startsWith("touchpad."))) return "input";
             return "other";
@@ -878,6 +935,37 @@ final class APIServer: @unchecked Sendable {
             const baseStatus = statusRoot.textContent.split("；系统音量：")[0];
             statusRoot.textContent = baseStatus + "；系统音量：" + (state.systemVolumeWritable ? "可调" : "不可调");
           }
+          async function refreshHIDAudioStatus() {
+            const status = await fetch("/v1/audio/hid-status", {headers: authHeaders()}).then(r => r.json()).catch(() => null);
+            if (!status) return;
+            document.querySelector("#hidAudioStatus").textContent =
+              "HID 音频状态：耳机=" + valueOrUnknown(status.headphoneDetected) +
+              " 麦克风=" + valueOrUnknown(status.microphoneDetected) +
+              " 静音=" + valueOrUnknown(status.micMuted) +
+              " raw=" + (status.rawStatus1 || "--") +
+              " 可信度=" + status.reliability;
+          }
+          function valueOrUnknown(value) {
+            if (value === true) return "是";
+            if (value === false) return "否";
+            return "未知";
+          }
+          async function sendHIDTestTone(target, enabled, durationMs) {
+            const body = {target, enabled, durationMs};
+            const result = await postJSON("/v1/audio/hid-test-tone", body, "audio.hidTestTone");
+            document.querySelector("#audioRecordStatus").textContent = "HID 测试音：" + (result.ok || "false") + " target=" + target + " enabled=" + enabled;
+            await refreshHIDAudioStatus();
+          }
+          async function startHIDCapture() {
+            const result = await postJSON("/v1/audio/hid-capture/start", {durationMs: 5000}, "audio.hidCapture.start");
+            document.querySelector("#audioRecordStatus").textContent = "HID 采样：" + result.message + " reports=" + result.reportCount;
+            setTimeout(stopHIDCapture, 5400);
+          }
+          async function stopHIDCapture() {
+            const result = await postJSON("/v1/audio/hid-capture/stop", {}, "audio.hidCapture.stop");
+            document.querySelector("#audioRecordStatus").textContent = "HID 采样：" + result.reportCount + " 条，PCM 证据=" + result.pcmEvidence;
+            appendLog({type:"audio.hid.capture.summary", payload:{reportCount: String(result.reportCount), pcmEvidence: result.pcmEvidence, changed: (result.byteChangeSummary || []).slice(0, 12).join(", ")}});
+          }
           async function sendHIDAudioVolume() {
             const body = {
               speaker: Number(document.querySelector("#hidSpeakerVolume").value),
@@ -947,6 +1035,12 @@ final class APIServer: @unchecked Sendable {
           document.querySelector("#recordAudio3s").addEventListener("click", () => recordAudio(3000));
           document.querySelector("#stopAudioRecord").addEventListener("click", stopRecord);
           document.querySelector("#playRecordedAudio").addEventListener("click", () => lastRecordingPath ? playAudioFile(lastRecordingPath) : appendLog({type:"audio.play.noRecording", payload:{message:"no recording path"}}));
+          document.querySelector("#refreshHIDAudioStatus").addEventListener("click", refreshHIDAudioStatus);
+          document.querySelector("#speakerTestTone").addEventListener("click", () => sendHIDTestTone("speaker", true, 3000));
+          document.querySelector("#headphoneTestTone").addEventListener("click", () => sendHIDTestTone("headphone", true, 3000));
+          document.querySelector("#stopTestTone").addEventListener("click", () => sendHIDTestTone(document.querySelector("#hidToneTarget").value, false, 0));
+          document.querySelector("#startHIDCapture").addEventListener("click", startHIDCapture);
+          document.querySelector("#stopHIDCapture").addEventListener("click", stopHIDCapture);
           document.querySelector("#pauseLog").addEventListener("click", () => { logPaused = !logPaused; document.querySelector("#pauseLog").textContent = logPaused ? "继续" : "暂停"; });
           document.querySelector("#clearLog").addEventListener("click", () => { logEntries.length = 0; renderLog(); });
           document.querySelector("#logFilter").addEventListener("change", event => { logFilter = event.target.value; renderLog(); });
@@ -992,9 +1086,11 @@ final class APIServer: @unchecked Sendable {
           renderButtons();
           refreshStatus();
           refreshAudioDevices();
+          refreshHIDAudioStatus();
           loadRecent();
           connectEvents();
           setInterval(refreshStatus, 1500);
+          setInterval(refreshHIDAudioStatus, 3000);
           </script>
         </body>
         </html>

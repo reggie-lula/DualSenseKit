@@ -383,6 +383,47 @@ struct AudioVolumeState: Codable, Equatable, Sendable {
     var message: String
 }
 
+enum HIDAudioTarget: String, Codable, Equatable, Sendable {
+    case speaker
+    case headphone
+}
+
+struct HIDAudioTestToneRequest: Codable, Equatable, Sendable {
+    var target: HIDAudioTarget
+    var enabled: Bool
+    var durationMs: Int? = nil
+}
+
+struct HIDAudioStatusResponse: Codable, Equatable, Sendable {
+    var hidConnected: Bool
+    var hidWritable: Bool
+    var transport: String?
+    var headphoneDetected: Bool?
+    var microphoneDetected: Bool?
+    var micMuted: Bool?
+    var rawStatus0: String?
+    var rawStatus1: String?
+    var sourceConnection: String?
+    var reliability: String
+    var message: String
+}
+
+struct HIDCaptureStartRequest: Codable, Equatable, Sendable {
+    var durationMs: Int? = nil
+}
+
+struct HIDCaptureResponse: Codable, Equatable, Sendable {
+    var active: Bool
+    var startedAt: Date?
+    var stoppedAt: Date?
+    var reportCount: Int
+    var uniqueReportIDs: [UInt8]
+    var byteChangeSummary: [String]
+    var pcmEvidence: String
+    var message: String
+    var reports: [RawHIDReport]
+}
+
 struct RecordAudioRequest: Codable, Equatable, Sendable {
     var inputDeviceID: UInt32? = nil
     var useMacFallback: Bool? = nil

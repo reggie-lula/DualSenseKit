@@ -64,6 +64,7 @@ DualSenseKit 当前由两部分组成：
 
 | 日期 | 状态 | 任务 | 相关功能点 | 开始提交 | 验证方式 | 结果 |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-06-18 | done | 蓝牙音频能力探测与 HID 测试音 Demo | 功能 9 | `8004bbd` | `scripts/test.sh`、`scripts/build.sh`、`/test` 音频面板、`/v1/audio/hid-status`、`/v1/audio/hid-test-tone` | 已完成：新增安全 HID waveout 测试音 feature report、耳机/麦克风/静音 status bit 解析、短时 HID capture；无 HID 连接时接口稳定返回等待/失败状态，浏览器 `/test` 冒烟无控制台错误。蓝牙麦克风仍只做可行性探测，不承诺 PCM 通道。 |
 | 2026-06-18 | done | 测试 UI 可视化、发包日志、传感器显示、Agent.skill 工作规则 | 功能 1、2、3、4、5、6、7、8 | `b12b879` | `scripts/test.sh`、`scripts/build.sh`、`/test` 页面冒烟 | 已完成：新增左侧控制栏与发包日志、右侧手柄 SVG 预览、触控点、摇杆/扳机高亮、陀螺仪/加速度计 raw 显示、HID output 日志事件；浏览器验证 `/test` 无新控制台错误，玩家灯全灭操作出现 `ui.action`、`hid.output.request`、`hid.output.success`。 |
 | 2026-06-18 | done | 音频播放与麦克风测试 Demo：CoreAudio 设备诊断、文件播放、录音测试 | 功能 9 | `134a535` | `scripts/test.sh`、`scripts/build.sh`、`/v1/audio/devices`、`/test` 音频面板冒烟 | 已完成：新增 CoreAudio 输入/输出枚举、`/v1/audio/devices`、文件播放结果对象、录音 start/stop/status、测试页音频面板和 `audio.*` 事件日志；本机蓝牙 DualSense 显示 `no_dualsense_audio_endpoint`，Mac fallback 设备可见。 |
 | 2026-06-18 | done | 音频音量控制 Demo：DualSense HID 扬声器/耳机音量与 CoreAudio 系统输出音量 | 功能 9 | `9854aae` | `scripts/test.sh`、`scripts/build.sh`、`/v1/audio/volume-state`、`/test` 音量滑块冒烟 | 已完成：新增 DualSense HID speaker/headphone volume report、`/v1/audio/hid-volume`、`/v1/audio/volume-state`、`/v1/audio/system-volume`、测试页 3 个音量滑块和音量 report 字节测试。 |
@@ -1018,6 +1019,9 @@ HID lightbar：
 - 已实现本地音频文件路径播放，支持 macOS 可解码的 `wav/aiff/mp3/m4a/mp4` 等格式。
 - 已实现录音 start/stop/status，录音保存到临时 wav 文件。
 - 已实现 DualSense HID 扬声器/耳机音量控制和 CoreAudio 系统输出音量控制。
+- 已实现 HID 私有 waveout 测试音：可分别触发扬声器/耳机测试音，但这不是 mp3/wav PCM 蓝牙播放。
+- 已实现 HID 音频状态探测：解析耳机插入、麦克风插入、麦克风静音 status bits；蓝牙下标记为实验诊断，不视为麦克风 PCM 可用证明。
+- 已实现短时 HID capture，用于对比 USB/蓝牙 input report 的变化并辅助判断是否存在音频载荷。
 - macOS 蓝牙下通常不会把 DualSense 暴露为音频输出/输入；本机当前状态为 `no_dualsense_audio_endpoint`。
 - 普通 Swift App 不能静默创建系统级扬声器/麦克风设备。
 
@@ -1038,8 +1042,11 @@ HID lightbar：
 - 文件播放：`POST /v1/audio/play`，body 支持 `path`、`outputDeviceID`、`useMacFallback`。
 - 录音测试：`POST /v1/audio/record/start`、`POST /v1/audio/record/stop`、`GET /v1/audio/record/status`。
 - HID 音量：`PUT /v1/audio/hid-volume`，body 支持 `headphone`、`speaker`，值域 `0...1`。
+- HID 测试音：`POST /v1/audio/hid-test-tone`，body 支持 `target`、`enabled`、`durationMs`。
+- HID 音频状态：`GET /v1/audio/hid-status`，返回耳机/麦克风/静音状态和可靠性说明。
+- HID 采样：`POST /v1/audio/hid-capture/start`、`POST /v1/audio/hid-capture/stop`，只记录受限 input report 摘要，不做任意 HID 写入。
 - 系统音量：`GET /v1/audio/volume-state`、`PUT /v1/audio/system-volume`，值域 `0...1`，设备不支持 master volume 时返回 `unsupported`。
-- 音频事件进入 WebSocket：`audio.device.scan`、`audio.play.*`、`audio.record.*`。
+- 音频事件进入 WebSocket：`audio.device.scan`、`audio.play.*`、`audio.record.*`、`audio.hid.*`、`hid.feature.*`。
 - 显示虚拟驱动未安装状态。
 
 长期：
@@ -1060,8 +1067,11 @@ HID lightbar：
 - 本地音频文件路径播放。
 - 录制 3 秒、停止录音、播放录音。
 - DualSense HID 扬声器音量、耳机音量。
+- HID 测试音按钮：扬声器测试音、耳机测试音、停止测试音。
+- HID 音频状态：耳机插入、麦克风插入、静音、raw status、可靠性。
+- HID capture：短时采样 input report，用于人工对比蓝牙/USB 差异。
 - 当前 CoreAudio 输出端点系统音量。
-- CoreAudio/HID 音频边界提示：蓝牙 HID 不作为 mp3/wav/麦克风 PCM 音频通道。
+- CoreAudio/HID 音频边界提示：HID 测试音不等于 mp3/wav 蓝牙播放，HID 状态探测不等于麦克风 PCM 录音。
 
 ### 事件/API 设计
 
@@ -1082,6 +1092,10 @@ HID lightbar：
 - `GET /v1/audio/volume-state`
 - `PUT /v1/audio/hid-volume`
 - `PUT /v1/audio/system-volume`
+- `GET /v1/audio/hid-status`
+- `POST /v1/audio/hid-test-tone`
+- `POST /v1/audio/hid-capture/start`
+- `POST /v1/audio/hid-capture/stop`
 
 ### 测试步骤
 
@@ -1089,10 +1103,14 @@ HID lightbar：
 2. USB 连接下枚举音频设备。
 3. 如果存在 DualSense 输出，尝试播放提示音。
 4. 如果不存在，页面明确显示不可用。
+5. 点击扬声器/耳机 HID 测试音，确认日志出现 `ui.action`、`hid.feature.request` 和 success/failure。
+6. 运行 HID capture，对比耳机插拔、静音键和说话时的 input report；若没有大载荷或稳定 PCM 证据，记录为不可用。
 
 ### 验收标准
 
 - 不假装蓝牙一定支持手柄扬声器/麦克风。
+- 不把 HID waveout 测试音描述成任意音频文件播放。
+- 蓝牙麦克风只有在 capture 证明存在 PCM-like 数据后才允许进入下一步桥接设计。
 - 不自动绕过 macOS 系统扩展授权。
 - 文档清楚说明 DriverKit 要求。
 
@@ -1230,3 +1248,4 @@ http://127.0.0.1:17395/test
 | 2026-06-18 | 音频 MVP 只使用 macOS CoreAudio 已暴露端点 | 本机蓝牙 DualSense 没有系统音频输入/输出，普通 HID 不等于 PCM 音频通道 | `/v1/audio/devices` 明确显示 `no_dualsense_audio_endpoint`，播放/录音支持 Mac fallback |
 | 2026-06-18 | 不用虚拟网卡模拟麦克风/扬声器 | macOS 系统音频设备应走 CoreAudio HAL/AudioDriverKit/System Extension | 虚拟麦克风/扬声器后续单独做驱动项目，不放进普通 Demo MVP |
 | 2026-06-18 | 音量控制拆成 DualSense HID 音量和 CoreAudio 系统音量 | 手柄内部 speaker/headphone volume 与 macOS 输出设备 master volume 是两条不同路径 | 测试页同时提供三条滑块，日志区分 `hid.output.* intent=audioVolume` 与 `audio.volume.system.*` |
+| 2026-06-18 | 蓝牙音频先做 HID 测试音和状态探测 | daidr 的 speaker/headphone 测试是 Sony 私有 waveout feature report；Linux 驱动也说明音频功能当前限制在 USB | `/v1/audio/hid-test-tone` 只标记为测试音；蓝牙麦克风必须通过 HID capture 找到 PCM 证据后才能继续桥接 |

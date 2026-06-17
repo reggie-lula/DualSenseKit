@@ -69,25 +69,58 @@ public struct DualSenseMotion: Equatable, Sendable {
     }
 }
 
+public enum DualSenseAudioOutputTarget: String, Codable, Equatable, Sendable {
+    case speaker
+    case headphone
+}
+
+public struct DualSenseAudioStatus: Equatable, Sendable {
+    public var headphoneDetected: Bool
+    public var microphoneDetected: Bool
+    public var micMuted: Bool
+    public var rawStatus0: UInt8
+    public var rawStatus1: UInt8
+    public var sourceConnection: DualSenseConnection
+
+    public init(
+        headphoneDetected: Bool,
+        microphoneDetected: Bool,
+        micMuted: Bool,
+        rawStatus0: UInt8,
+        rawStatus1: UInt8,
+        sourceConnection: DualSenseConnection
+    ) {
+        self.headphoneDetected = headphoneDetected
+        self.microphoneDetected = microphoneDetected
+        self.micMuted = micMuted
+        self.rawStatus0 = rawStatus0
+        self.rawStatus1 = rawStatus1
+        self.sourceConnection = sourceConnection
+    }
+}
+
 public struct DualSenseInputReport: Sendable {
     public var axes: [String: Float]
     public var hat: UInt8
     public var buttons: [(DualSenseButton, Bool)]
     public var touchPoints: [DualSenseTouchPoint]
     public var motion: DualSenseMotion?
+    public var audioStatus: DualSenseAudioStatus?
 
     public init(
         axes: [String: Float],
         hat: UInt8,
         buttons: [(DualSenseButton, Bool)],
         touchPoints: [DualSenseTouchPoint],
-        motion: DualSenseMotion? = nil
+        motion: DualSenseMotion? = nil,
+        audioStatus: DualSenseAudioStatus? = nil
     ) {
         self.axes = axes
         self.hat = hat
         self.buttons = buttons
         self.touchPoints = touchPoints
         self.motion = motion
+        self.audioStatus = audioStatus
     }
 }
 
@@ -143,6 +176,22 @@ public enum DualSenseOutputIntent: Equatable, Sendable {
     case resetEffects
 }
 
+public enum DualSenseFeatureIntent: Equatable, Sendable {
+    case waveOut(target: DualSenseAudioOutputTarget, enabled: Bool)
+}
+
+public struct DualSenseFeatureReportCommand: Equatable, Sendable {
+    public var reportID: UInt8
+    public var payload: Data
+    public var name: String
+
+    public init(reportID: UInt8, payload: Data, name: String) {
+        self.reportID = reportID
+        self.payload = payload
+        self.name = name
+    }
+}
+
 public enum DualSenseTriggerSide: Sendable {
     case left
     case right
@@ -154,14 +203,19 @@ public enum DualSenseProtocol {
     public static let dualSenseEdgeProductID = 0x0df2
     public static let bluetoothOutputReportID: UInt8 = 0x31
     public static let usbOutputReportID: UInt8 = 0x02
+    public static let testCommandFeatureReportID: UInt8 = 0x80
+    public static let featureReportPayloadSize = 63
 
     public static func parseInputReport(_ report: Data) -> DualSenseInputReport? {
         let bytes = [UInt8](report)
         let offset: Int
+        let connection: DualSenseConnection
         if bytes.count >= 78, bytes.first == 0x31 {
             offset = 2
+            connection = .bluetooth
         } else if bytes.count >= 64, bytes.first == 0x01 {
             offset = 1
+            connection = .usb
         } else {
             return nil
         }
@@ -206,6 +260,9 @@ public enum DualSenseProtocol {
                 timestamp: uint32LE(bytes, offset + 27)
             )
             : nil
+        let audioStatus = bytes.count > offset + 53
+            ? parseAudioStatus(bytes, offset: offset, connection: connection)
+            : nil
         return DualSenseInputReport(
             axes: [
                 "leftStickX": normalizeThumbStickAxis(bytes[offset + 0]),
@@ -218,8 +275,13 @@ public enum DualSenseProtocol {
             hat: buttons0 & 0x0f,
             buttons: buttons,
             touchPoints: touchPoints,
-            motion: motion
+            motion: motion,
+            audioStatus: audioStatus
         )
+    }
+
+    public static func parseAudioStatus(from report: Data) -> DualSenseAudioStatus? {
+        parseInputReport(report)?.audioStatus
     }
 
     public static func specialButtonsByte(from report: Data) -> UInt8? {
@@ -335,6 +397,31 @@ public enum DualSenseProtocol {
         return report
     }
 
+    public static func featureReportCommands(
+        for intent: DualSenseFeatureIntent,
+        connection: DualSenseConnection
+    ) -> [DualSenseFeatureReportCommand] {
+        switch intent {
+        case .waveOut(let target, let enabled):
+            var commands: [DualSenseFeatureReportCommand] = []
+            if enabled {
+                commands.append(testCommand(
+                    actionID: 0x04,
+                    params: waveOutSetupParams(target: target),
+                    name: "waveout_setup_\(target.rawValue)",
+                    connection: connection
+                ))
+            }
+            commands.append(testCommand(
+                actionID: 0x02,
+                params: [enabled ? 1 : 0, 1, 0],
+                name: enabled ? "waveout_enable_\(target.rawValue)" : "waveout_disable",
+                connection: connection
+            ))
+            return commands
+        }
+    }
+
     public static func normalizeThumbStickAxis(_ value: UInt8) -> Float {
         (2 * Float(value)) / 255 - 1
     }
@@ -364,6 +451,56 @@ public enum DualSenseProtocol {
         )
     }
 
+    private static func parseAudioStatus(
+        _ bytes: [UInt8],
+        offset: Int,
+        connection: DualSenseConnection
+    ) -> DualSenseAudioStatus {
+        let status0 = bytes[offset + 52]
+        let status1 = bytes[offset + 53]
+        return DualSenseAudioStatus(
+            headphoneDetected: (status1 & 0x01) != 0,
+            microphoneDetected: (status1 & 0x02) != 0,
+            micMuted: (status1 & 0x04) != 0,
+            rawStatus0: status0,
+            rawStatus1: status1,
+            sourceConnection: connection
+        )
+    }
+
+    private static func waveOutSetupParams(target: DualSenseAudioOutputTarget) -> [UInt8] {
+        var params = Array(repeating: UInt8(0), count: 20)
+        switch target {
+        case .headphone:
+            params[4] = 4
+            params[6] = 6
+        case .speaker:
+            params[2] = 8
+        }
+        return params
+    }
+
+    private static func testCommand(
+        actionID: UInt8,
+        params: [UInt8],
+        name: String,
+        connection: DualSenseConnection
+    ) -> DualSenseFeatureReportCommand {
+        var payload = Data(repeating: 0, count: featureReportPayloadSize)
+        payload[0] = 0x06
+        payload[1] = actionID
+        let safeParams = Array(params.prefix(featureReportPayloadSize - 2))
+        payload.replaceSubrange(2..<(2 + safeParams.count), with: safeParams)
+        if connection == .bluetooth {
+            writeFeatureCRC(reportID: testCommandFeatureReportID, to: &payload)
+        }
+        return DualSenseFeatureReportCommand(
+            reportID: testCommandFeatureReportID,
+            payload: payload,
+            name: name
+        )
+    }
+
     private static func int16LE(_ bytes: [UInt8], _ index: Int) -> Int16 {
         let value = UInt16(bytes[index]) | (UInt16(bytes[index + 1]) << 8)
         return Int16(bitPattern: value)
@@ -383,6 +520,15 @@ public enum DualSenseProtocol {
         report[crcOffset + 1] = UInt8((crc >> 8) & 0xff)
         report[crcOffset + 2] = UInt8((crc >> 16) & 0xff)
         report[crcOffset + 3] = UInt8((crc >> 24) & 0xff)
+    }
+
+    private static func writeFeatureCRC(reportID: UInt8, to payload: inout Data) {
+        let crc = crc32(bytes: [0x53, reportID] + payload.dropLast(4))
+        let crcOffset = payload.count - 4
+        payload[crcOffset] = UInt8(crc & 0xff)
+        payload[crcOffset + 1] = UInt8((crc >> 8) & 0xff)
+        payload[crcOffset + 2] = UInt8((crc >> 16) & 0xff)
+        payload[crcOffset + 3] = UInt8((crc >> 24) & 0xff)
     }
 
     private static func brightnessScale(_ brightness: UInt8?) -> Float {
