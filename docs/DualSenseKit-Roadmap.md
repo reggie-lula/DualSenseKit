@@ -65,6 +65,7 @@ DualSenseKit 当前由两部分组成：
 | 日期 | 状态 | 任务 | 相关功能点 | 开始提交 | 验证方式 | 结果 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-06-18 | done | 测试 UI 可视化、发包日志、传感器显示、Agent.skill 工作规则 | 功能 1、2、3、4、5、6、7、8 | `b12b879` | `scripts/test.sh`、`scripts/build.sh`、`/test` 页面冒烟 | 已完成：新增左侧控制栏与发包日志、右侧手柄 SVG 预览、触控点、摇杆/扳机高亮、陀螺仪/加速度计 raw 显示、HID output 日志事件；浏览器验证 `/test` 无新控制台错误，玩家灯全灭操作出现 `ui.action`、`hid.output.request`、`hid.output.success`。 |
+| 2026-06-18 | done | 音频播放与麦克风测试 Demo：CoreAudio 设备诊断、文件播放、录音测试 | 功能 9 | `134a535` | `scripts/test.sh`、`scripts/build.sh`、`/v1/audio/devices`、`/test` 音频面板冒烟 | 已完成：新增 CoreAudio 输入/输出枚举、`/v1/audio/devices`、文件播放结果对象、录音 start/stop/status、测试页音频面板和 `audio.*` 事件日志；本机蓝牙 DualSense 显示 `no_dualsense_audio_endpoint`，Mac fallback 设备可见。 |
 
 ## 阶段路线图
 
@@ -1012,12 +1013,17 @@ HID lightbar：
 ### 当前状态
 
 - 当前基础版本有 `AudioService`。
-- macOS 蓝牙下通常不会把 DualSense 暴露为音频输出/输入。
+- 已实现 CoreAudio 输入/输出设备枚举、默认输入/输出标记、DualSense 候选端点匹配。
+- 已实现本地音频文件路径播放，支持 macOS 可解码的 `wav/aiff/mp3/m4a/mp4` 等格式。
+- 已实现录音 start/stop/status，录音保存到临时 wav 文件。
+- macOS 蓝牙下通常不会把 DualSense 暴露为音频输出/输入；本机当前状态为 `no_dualsense_audio_endpoint`。
 - 普通 Swift App 不能静默创建系统级扬声器/麦克风设备。
 
 ### 需要改动的模块
 
 - `AudioService`
+- `APIServer.testPageHTML()`
+- `Models`
 - README / docs
 - 后续新 target：`DualSenseKitAudioDriver`
 
@@ -1025,8 +1031,11 @@ HID lightbar：
 
 短期：
 
-- 提供设备枚举。
-- 显示是否存在 DualSense 真实音频端点。
+- 提供设备枚举：`GET /v1/audio/devices`。
+- 显示是否存在 DualSense 真实音频端点，状态包括 `no_dualsense_audio_endpoint`、`dualsense_input_only`、`dualsense_output_only`、`dualsense_input_output_available`。
+- 文件播放：`POST /v1/audio/play`，body 支持 `path`、`outputDeviceID`、`useMacFallback`。
+- 录音测试：`POST /v1/audio/record/start`、`POST /v1/audio/record/stop`、`GET /v1/audio/record/status`。
+- 音频事件进入 WebSocket：`audio.device.scan`、`audio.play.*`、`audio.record.*`。
 - 显示虚拟驱动未安装状态。
 
 长期：
@@ -1044,8 +1053,9 @@ HID lightbar：
 - 系统输出设备。
 - 系统输入设备。
 - DualSense 音频端点。
-- 虚拟驱动状态。
-- 安装/授权步骤。
+- 本地音频文件路径播放。
+- 录制 3 秒、停止录音、播放录音。
+- CoreAudio/HID 音频边界提示：蓝牙 HID 不作为 mp3/wav/麦克风 PCM 音频通道。
 
 ### 事件/API 设计
 
@@ -1054,6 +1064,15 @@ HID lightbar：
 - `GET /v1/audio/devices`
 - `GET /v1/audio/driver/status`
 - `POST /v1/audio/driver/install-guide`
+
+已实现：
+
+- `GET /v1/audio/devices`
+- `POST /v1/audio/play`
+- `GET /v1/audio/outputs`
+- `POST /v1/audio/record/start`
+- `POST /v1/audio/record/stop`
+- `GET /v1/audio/record/status`
 
 ### 测试步骤
 
@@ -1199,3 +1218,5 @@ http://127.0.0.1:17395/test
 | 2026-06-17 | 音频虚拟设备不放进普通 App | macOS 需要系统扩展和授权 | 先做诊断，后续单独 DriverKit 项目 |
 | 2026-06-18 | 测试页采用内嵌 SVG 手柄预览 | 避免外部图片依赖和版权问题，同时便于按钮高亮 | 后续输入反馈优先扩展 SVG 元素和事件映射 |
 | 2026-06-18 | 发包日志对高频 motion/axis/touch 输入节流 | 传感器事件频率高，会淹没 `ui.action` 和 `hid.output.*` | 传感器数值在右侧实时显示，日志保留可读的采样事件 |
+| 2026-06-18 | 音频 MVP 只使用 macOS CoreAudio 已暴露端点 | 本机蓝牙 DualSense 没有系统音频输入/输出，普通 HID 不等于 PCM 音频通道 | `/v1/audio/devices` 明确显示 `no_dualsense_audio_endpoint`，播放/录音支持 Mac fallback |
+| 2026-06-18 | 不用虚拟网卡模拟麦克风/扬声器 | macOS 系统音频设备应走 CoreAudio HAL/AudioDriverKit/System Extension | 虚拟麦克风/扬声器后续单独做驱动项目，不放进普通 Demo MVP |

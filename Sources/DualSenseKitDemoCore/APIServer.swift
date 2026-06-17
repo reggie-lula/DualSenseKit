@@ -208,13 +208,58 @@ final class APIServer: @unchecked Sendable {
         case ("POST", "/v1/audio/play"):
             do {
                 let request = try JSONDecoder().decode(PlayAudioRequest.self, from: request.body)
-                send(status: 200, json: ["capability": audioService.play(request).rawValue], connection: connection)
+                let result = audioService.play(request)
+                eventBus.publish(BridgeEvent(type: "audio.play.\(result.status.rawValue)", payload: [
+                    "capability": result.capability.rawValue,
+                    "outputDeviceID": result.outputDeviceID.map(String.init) ?? "",
+                    "outputDeviceName": result.outputDeviceName ?? "",
+                    "path": result.path ?? "",
+                    "message": result.message
+                ]))
+                sendCodable(status: 200, value: result, connection: connection)
             } catch {
                 send(status: 400, json: ["error": "invalid_audio_request"], connection: connection)
             }
 
+        case ("GET", "/v1/audio/devices"):
+            let devices = audioService.devices()
+            eventBus.publish(BridgeEvent(type: "audio.device.scan", payload: [
+                "inputs": "\(devices.inputs.count)",
+                "outputs": "\(devices.outputs.count)",
+                "dualSenseAudioStatus": devices.dualSenseAudioStatus
+            ]))
+            sendCodable(status: 200, value: devices, connection: connection)
+
         case ("GET", "/v1/audio/outputs"):
             sendCodable(status: 200, value: audioService.outputDevices(), connection: connection)
+
+        case ("POST", "/v1/audio/record/start"):
+            do {
+                let request = try JSONDecoder().decode(RecordAudioRequest.self, from: request.body)
+                let status = audioService.startRecording(request)
+                eventBus.publish(BridgeEvent(type: "audio.record.\(status.status.rawValue)", payload: [
+                    "inputDeviceID": status.inputDeviceID.map(String.init) ?? "",
+                    "inputDeviceName": status.inputDeviceName ?? "",
+                    "outputPath": status.outputPath ?? "",
+                    "message": status.message
+                ]))
+                sendCodable(status: 200, value: status, connection: connection)
+            } catch {
+                send(status: 400, json: ["error": "invalid_record_request"], connection: connection)
+            }
+
+        case ("POST", "/v1/audio/record/stop"):
+            let status = audioService.stopRecording()
+            eventBus.publish(BridgeEvent(type: "audio.record.\(status.status.rawValue)", payload: [
+                "inputDeviceID": status.inputDeviceID.map(String.init) ?? "",
+                "inputDeviceName": status.inputDeviceName ?? "",
+                "outputPath": status.outputPath ?? "",
+                "message": status.message
+            ]))
+            sendCodable(status: 200, value: status, connection: connection)
+
+        case ("GET", "/v1/audio/record/status"):
+            sendCodable(status: 200, value: audioService.recordingStatus(), connection: connection)
 
         case ("POST", "/v1/audio/say"):
             do {
@@ -398,8 +443,9 @@ final class APIServer: @unchecked Sendable {
             h1 { margin: 0; color: var(--blue); font-size: 18px; }
             h2 { margin: 0 0 12px; color: var(--blue); font-size: 18px; border-left: 5px solid var(--blue); padding-left: 8px; }
             h3 { margin: 0 0 8px; color: var(--blue); font-size: 14px; }
-            button, select, input[type="color"] { min-height: 30px; border-radius: 999px; border: 1px solid var(--blue-weak); background: #fff; color: var(--blue); font-weight: 600; }
+            button, select, input[type="color"], input[type="text"] { min-height: 30px; border-radius: 999px; border: 1px solid var(--blue-weak); background: #fff; color: var(--blue); font-weight: 600; }
             button { padding: 0 12px; }
+            input[type="text"] { width: 100%; padding: 0 12px; min-width: 0; }
             button.active, button:active { background: var(--blue); color: #fff; }
             input[type="range"] { width: 100%; accent-color: var(--blue); }
             label { color: var(--blue); font-weight: 700; font-size: 14px; }
@@ -407,6 +453,8 @@ final class APIServer: @unchecked Sendable {
             .side-panel, .preview-panel { min-width: 0; }
             .module { background: var(--panel); border: 1px solid var(--line); border-radius: 24px; padding: 16px 18px; margin-bottom: 14px; }
             .status-grid { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; color: var(--blue); font-weight: 700; }
+            .audio-note { color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 8px; }
+            .audio-status { color: var(--blue); font-weight: 700; font-size: 12px; line-height: 1.45; word-break: break-word; }
             .actions { display: flex; flex-wrap: wrap; gap: 8px; }
             .control-row { display: grid; grid-template-columns: 118px 1fr; gap: 10px; align-items: center; margin: 9px 0; }
             .control-row.compact { grid-template-columns: 118px auto; }
@@ -478,6 +526,17 @@ final class APIServer: @unchecked Sendable {
                 <div class="control-row"><label>R2 起始</label><input id="rightTriggerStart" type="range" min="0" max="0.95" step="0.01" value="0.10"></div>
                 <div class="control-row"><label>R2 力度</label><input id="rightTriggerStrength" type="range" min="0" max="1" step="0.01" value="0"></div>
                 <div class="actions"><button id="stopRumble">停止震动</button><button id="disableTriggers">关闭扳机</button><button id="resetEffects">复位手柄效果</button><button id="sequence">运行灯光序列</button></div>
+              </section>
+
+              <section class="module">
+                <h2>音频</h2>
+                <div id="audioStatus" class="audio-status">正在扫描 CoreAudio 设备...</div>
+                <div class="control-row compact"><label>输出端点</label><select id="audioOutputSelect"></select></div>
+                <div class="control-row compact"><label>输入端点</label><select id="audioInputSelect"></select></div>
+                <div class="control-row"><label>音频文件路径</label><input id="audioPath" type="text" placeholder="/Users/.../test.wav 或 .mp3/.m4a/.mp4"></div>
+                <div class="actions"><button id="refreshAudio">刷新音频设备</button><button id="playAudioFile">播放文件</button><button id="recordAudio3s">录制 3 秒</button><button id="stopAudioRecord">停止录音</button><button id="playRecordedAudio">播放录音</button></div>
+                <div id="audioRecordStatus" class="audio-note">录音：未开始</div>
+                <div class="audio-note">MVP 只使用 macOS 已暴露的 CoreAudio 端点。蓝牙 HID 不作为 mp3/wav/麦克风 PCM 音频通道；如未检测到 DualSense 音频端点，会使用 Mac fallback 测试链路。</div>
               </section>
 
               <section class="module">
@@ -571,6 +630,7 @@ final class APIServer: @unchecked Sendable {
           function classify(event) {
             if (event.type === "ui.action") return "ui";
             if (event.type && event.type.startsWith("hid.output")) return event.type.endsWith("failure") ? "failure" : "output";
+            if (event.type && event.type.startsWith("audio.")) return event.type.includes("failed") ? "failure" : "output";
             if (event.type && (event.type.startsWith("button.") || event.type.startsWith("hid.") || event.type.startsWith("touchpad."))) return "input";
             return "other";
           }
@@ -713,6 +773,12 @@ final class APIServer: @unchecked Sendable {
             await fetch(endpoint, {method:"PUT", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify(body)});
             refreshStatus();
           }
+          async function postJSON(endpoint, body, action) {
+            uiAction(action, endpoint, body);
+            const response = await fetch(endpoint, {method:"POST", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify(body || {})});
+            const json = await response.json().catch(() => ({}));
+            return json;
+          }
           async function sendRumble(heavy, light, durationMs = 0) { await requestJSON("/v1/haptics/rumble", {heavy, light, durationMs}, "rumble"); }
           function triggerPayload(side) {
             return {mode: document.querySelector("#" + side + "TriggerMode").value, startPosition: Number(document.querySelector("#" + side + "TriggerStart").value), strength: Number(document.querySelector("#" + side + "TriggerStrength").value)};
@@ -728,6 +794,46 @@ final class APIServer: @unchecked Sendable {
             const body = {r: parseInt(color.slice(1,3), 16), g: parseInt(color.slice(3,5), 16), b: parseInt(color.slice(5,7), 16), brightness: Number(document.querySelector("#lightbarBrightness").value)};
             await requestJSON("/v1/light/lightbar", body, "lightbar");
           }
+          let lastRecordingPath = "";
+          async function refreshAudioDevices() {
+            const devices = await fetch("/v1/audio/devices", {headers: authHeaders()}).then(r => r.json()).catch(() => null);
+            if (!devices) return;
+            const out = document.querySelector("#audioOutputSelect");
+            const input = document.querySelector("#audioInputSelect");
+            const outputOptions = ['<option value="">自动：优先 DualSense，否则 Mac fallback</option>'].concat((devices.outputs || []).map(d => '<option value="' + d.id + '">' + escapeHTML(d.name) + (d.isDefaultOutput ? '（默认）' : '') + (d.isDualSenseCandidate ? '（DualSense 候选）' : '') + '</option>'));
+            const inputOptions = ['<option value="">自动：优先 DualSense，否则 Mac fallback</option>'].concat((devices.inputs || []).map(d => '<option value="' + d.id + '">' + escapeHTML(d.name) + (d.isDefaultInput ? '（默认）' : '') + (d.isDualSenseCandidate ? '（DualSense 候选）' : '') + '</option>'));
+            out.innerHTML = outputOptions.join("");
+            input.innerHTML = inputOptions.join("");
+            document.querySelector("#audioStatus").textContent = "DualSense 音频状态：" + devices.dualSenseAudioStatus + "；输出 " + (devices.outputs || []).length + " 个，输入 " + (devices.inputs || []).length + " 个";
+          }
+          async function playAudioFile(pathOverride) {
+            const selected = document.querySelector("#audioOutputSelect").value;
+            const path = pathOverride || document.querySelector("#audioPath").value;
+            const body = {path, useMacFallback: true};
+            if (selected) body.outputDeviceID = Number(selected);
+            const result = await postJSON("/v1/audio/play", body, "audio.play");
+            document.querySelector("#audioRecordStatus").textContent = "播放：" + (result.status || "unknown") + " " + (result.message || "");
+          }
+          async function recordAudio(durationMs) {
+            const selected = document.querySelector("#audioInputSelect").value;
+            const body = {useMacFallback: true, durationMs};
+            if (selected) body.inputDeviceID = Number(selected);
+            const result = await postJSON("/v1/audio/record/start", body, "audio.record.start");
+            if (result.outputPath) lastRecordingPath = result.outputPath;
+            document.querySelector("#audioRecordStatus").textContent = "录音：" + (result.status || "unknown") + " " + (result.message || "") + (result.outputPath ? " -> " + result.outputPath : "");
+            if (durationMs) setTimeout(refreshRecordStatus, durationMs + 400);
+          }
+          async function stopRecord() {
+            const result = await postJSON("/v1/audio/record/stop", {}, "audio.record.stop");
+            if (result.outputPath) lastRecordingPath = result.outputPath;
+            document.querySelector("#audioRecordStatus").textContent = "录音：" + (result.status || "unknown") + " " + (result.message || "") + (result.outputPath ? " -> " + result.outputPath : "");
+          }
+          async function refreshRecordStatus() {
+            const result = await fetch("/v1/audio/record/status", {headers: authHeaders()}).then(r => r.json()).catch(() => null);
+            if (!result) return;
+            if (result.outputPath) lastRecordingPath = result.outputPath;
+            document.querySelector("#audioRecordStatus").textContent = "录音：" + result.status + " " + result.message + (result.outputPath ? " -> " + result.outputPath : "");
+          }
           ["heavyRumble","lightRumble"].forEach(id => document.querySelector("#" + id).addEventListener("input", () => {
             clearTimeout(rumbleTimer);
             rumbleTimer = setTimeout(() => sendRumble(Number(document.querySelector("#heavyRumble").value), Number(document.querySelector("#lightRumble").value), 1000), 60);
@@ -740,6 +846,11 @@ final class APIServer: @unchecked Sendable {
           document.querySelector("#lightbarBrightness").addEventListener("input", sendLightbar);
           document.querySelector("#lightbarColor").addEventListener("input", sendLightbar);
           document.querySelector("#micLEDMode").addEventListener("change", sendMicLED);
+          document.querySelector("#refreshAudio").addEventListener("click", refreshAudioDevices);
+          document.querySelector("#playAudioFile").addEventListener("click", () => playAudioFile(""));
+          document.querySelector("#recordAudio3s").addEventListener("click", () => recordAudio(3000));
+          document.querySelector("#stopAudioRecord").addEventListener("click", stopRecord);
+          document.querySelector("#playRecordedAudio").addEventListener("click", () => lastRecordingPath ? playAudioFile(lastRecordingPath) : appendLog({type:"audio.play.noRecording", payload:{message:"no recording path"}}));
           document.querySelector("#pauseLog").addEventListener("click", () => { logPaused = !logPaused; document.querySelector("#pauseLog").textContent = logPaused ? "继续" : "暂停"; });
           document.querySelector("#clearLog").addEventListener("click", () => { logEntries.length = 0; renderLog(); });
           document.querySelector("#logFilter").addEventListener("change", event => { logFilter = event.target.value; renderLog(); });
@@ -784,6 +895,7 @@ final class APIServer: @unchecked Sendable {
           }
           renderButtons();
           refreshStatus();
+          refreshAudioDevices();
           loadRecent();
           connectEvents();
           setInterval(refreshStatus, 1500);

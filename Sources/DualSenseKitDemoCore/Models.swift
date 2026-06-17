@@ -302,16 +302,79 @@ struct AudioOutputDevice: Codable, Equatable, Sendable {
     var uid: String?
 }
 
+struct AudioDeviceInfo: Codable, Equatable, Sendable {
+    var id: UInt32
+    var name: String
+    var uid: String?
+    var hasInput: Bool
+    var hasOutput: Bool
+    var isDefaultInput: Bool
+    var isDefaultOutput: Bool
+    var isDualSenseCandidate: Bool
+}
+
+struct AudioDevicesResponse: Codable, Equatable, Sendable {
+    var inputs: [AudioDeviceInfo]
+    var outputs: [AudioDeviceInfo]
+    var defaultInputID: UInt32?
+    var defaultOutputID: UInt32?
+    var dualSenseInput: AudioDeviceInfo?
+    var dualSenseOutput: AudioDeviceInfo?
+    var dualSenseAudioStatus: String
+    var note: String
+}
+
 enum AudioCapability: String, Codable, Equatable, Sendable {
     case dualSenseOutputAvailable
     case unsupported
     case macFallback
 }
 
+enum AudioOperationStatus: String, Codable, Equatable, Sendable {
+    case played
+    case macFallback
+    case unsupported
+    case fileNotFound
+    case outputNotFound
+    case noDualSenseOutput
+    case noDualSenseInput
+    case inputNotFound
+    case recording
+    case notRecording
+    case stopped
+    case failed
+}
+
 struct PlayAudioRequest: Codable, Equatable, Sendable {
     var path: String?
     var systemSoundName: String?
     var useMacFallback: Bool?
+    var outputDeviceID: UInt32? = nil
+}
+
+struct PlayAudioResult: Codable, Equatable, Sendable {
+    var status: AudioOperationStatus
+    var capability: AudioCapability
+    var outputDeviceID: UInt32?
+    var outputDeviceName: String?
+    var path: String?
+    var message: String
+}
+
+struct RecordAudioRequest: Codable, Equatable, Sendable {
+    var inputDeviceID: UInt32? = nil
+    var useMacFallback: Bool? = nil
+    var durationMs: Int? = nil
+}
+
+struct RecordAudioStatus: Codable, Equatable, Sendable {
+    var status: AudioOperationStatus
+    var inputDeviceID: UInt32?
+    var inputDeviceName: String?
+    var outputPath: String?
+    var startedAt: Date?
+    var elapsedMs: Int?
+    var message: String
 }
 
 struct SayAudioRequest: Codable, Equatable, Sendable {

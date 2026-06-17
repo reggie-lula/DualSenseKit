@@ -54,6 +54,27 @@ struct SelfTest {
         let decodedTriggers = try JSONDecoder().decode(TriggerRequest.self, from: try JSONEncoder().encode(triggers))
         expect(decodedTriggers == triggers, "TriggerRequest should round-trip through JSON")
 
+        let playAudio = PlayAudioRequest(path: "/tmp/test.wav", systemSoundName: nil, useMacFallback: true, outputDeviceID: 83)
+        let decodedPlayAudio = try JSONDecoder().decode(PlayAudioRequest.self, from: try JSONEncoder().encode(playAudio))
+        expect(decodedPlayAudio == playAudio, "PlayAudioRequest should round-trip through JSON")
+
+        let recordAudio = RecordAudioRequest(inputDeviceID: 90, useMacFallback: true, durationMs: 3000)
+        let decodedRecordAudio = try JSONDecoder().decode(RecordAudioRequest.self, from: try JSONEncoder().encode(recordAudio))
+        expect(decodedRecordAudio == recordAudio, "RecordAudioRequest should round-trip through JSON")
+
+        let audioDevices = AudioDevicesResponse(
+            inputs: [],
+            outputs: [],
+            defaultInputID: nil,
+            defaultOutputID: nil,
+            dualSenseInput: nil,
+            dualSenseOutput: nil,
+            dualSenseAudioStatus: "no_dualsense_audio_endpoint",
+            note: "test"
+        )
+        let decodedAudioDevices = try JSONDecoder().decode(AudioDevicesResponse.self, from: try JSONEncoder().encode(audioDevices))
+        expect(decodedAudioDevices == audioDevices, "AudioDevicesResponse should round-trip through JSON")
+
         let executor = ActionExecutor(permissionService: PermissionService())
         expect(!executor.isShellCommandAllowed("say hello", shellConfig: ShellConfig()), "shell should be disabled by default")
         let exactShell = ShellConfig(enabled: true, allowedCommands: ["say hello"], allowedScriptDirectories: [])
