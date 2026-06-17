@@ -14,6 +14,8 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
     private var recordOutputURL: URL?
     private var recordPreviousDefaultInput: AudioDeviceID?
     private var restoreOutputWorkItem: DispatchWorkItem?
+    private var hidHeadphoneVolume: Float = 0.65
+    private var hidSpeakerVolume: Float = 0.85
 
     func capability() -> AudioCapability {
         if dualSenseOutputDevice() != nil {
@@ -146,6 +148,92 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
                 outputDeviceName: targetOutput?.name,
                 path: url.path,
                 message: "Audio playback failed: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    func updateHIDVolumeCache(_ request: AudioVolumeRequest) {
+        queue.sync {
+            if let headphone = request.headphone {
+                hidHeadphoneVolume = clamp01(headphone)
+            }
+            if let speaker = request.speaker {
+                hidSpeakerVolume = clamp01(speaker)
+            }
+        }
+    }
+
+    func volumeState(outputDeviceID: UInt32?) -> AudioVolumeState {
+        queue.sync {
+            let audioDevices = devices()
+            let output: AudioDeviceInfo?
+            if let outputDeviceID {
+                output = audioDevices.outputs.first { $0.id == outputDeviceID }
+            } else {
+                output = audioDevices.dualSenseOutput ?? audioDevices.outputs.first { $0.isDefaultOutput } ?? audioDevices.outputs.first
+            }
+            let volume = output.flatMap { systemVolume(deviceID: AudioDeviceID($0.id)) }
+            let writable = output.map { isSystemVolumeWritable(deviceID: AudioDeviceID($0.id)) } ?? false
+            return AudioVolumeState(
+                hidHeadphone: hidHeadphoneVolume,
+                hidSpeaker: hidSpeakerVolume,
+                outputDeviceID: output?.id,
+                outputDeviceName: output?.name,
+                systemVolume: volume,
+                systemVolumeWritable: writable,
+                status: output == nil ? .outputNotFound : .volumeSet,
+                message: output == nil
+                    ? "No CoreAudio output device is available."
+                    : (writable ? "System output volume is writable." : "This CoreAudio output device does not expose writable master volume.")
+            )
+        }
+    }
+
+    func setSystemVolume(_ request: SystemVolumeRequest) -> AudioVolumeState {
+        queue.sync {
+            let audioDevices = devices()
+            let output: AudioDeviceInfo?
+            if let outputDeviceID = request.outputDeviceID {
+                output = audioDevices.outputs.first { $0.id == outputDeviceID }
+            } else {
+                output = audioDevices.dualSenseOutput ?? audioDevices.outputs.first(where: \.isDefaultOutput) ?? audioDevices.outputs.first
+            }
+            guard let output else {
+                return AudioVolumeState(
+                    hidHeadphone: hidHeadphoneVolume,
+                    hidSpeaker: hidSpeakerVolume,
+                    outputDeviceID: request.outputDeviceID,
+                    outputDeviceName: nil,
+                    systemVolume: nil,
+                    systemVolumeWritable: false,
+                    status: .outputNotFound,
+                    message: "Requested output device was not found."
+                )
+            }
+            let deviceID = AudioDeviceID(output.id)
+            guard isSystemVolumeWritable(deviceID: deviceID) else {
+                return AudioVolumeState(
+                    hidHeadphone: hidHeadphoneVolume,
+                    hidSpeaker: hidSpeakerVolume,
+                    outputDeviceID: output.id,
+                    outputDeviceName: output.name,
+                    systemVolume: systemVolume(deviceID: deviceID),
+                    systemVolumeWritable: false,
+                    status: .unsupported,
+                    message: "This CoreAudio output device does not expose writable master volume."
+                )
+            }
+            let safeVolume = clamp01(request.volume)
+            setSystemVolume(deviceID: deviceID, volume: safeVolume)
+            return AudioVolumeState(
+                hidHeadphone: hidHeadphoneVolume,
+                hidSpeaker: hidSpeakerVolume,
+                outputDeviceID: output.id,
+                outputDeviceName: output.name,
+                systemVolume: systemVolume(deviceID: deviceID) ?? safeVolume,
+                systemVolumeWritable: true,
+                status: .volumeSet,
+                message: "System output volume was set."
             )
         }
     }
@@ -444,6 +532,40 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         return AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize) == noErr && dataSize > 0
     }
 
+    private func systemVolume(deviceID: AudioDeviceID) -> Float? {
+        var address = volumePropertyAddress()
+        guard AudioObjectHasProperty(deviceID, &address) else { return nil }
+        var volume: Float32 = 0
+        var dataSize = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, &volume) == noErr else {
+            return nil
+        }
+        return volume
+    }
+
+    private func isSystemVolumeWritable(deviceID: AudioDeviceID) -> Bool {
+        var address = volumePropertyAddress()
+        guard AudioObjectHasProperty(deviceID, &address) else { return false }
+        var settable = DarwinBoolean(false)
+        guard AudioObjectIsPropertySettable(deviceID, &address, &settable) == noErr else { return false }
+        return settable.boolValue
+    }
+
+    private func setSystemVolume(deviceID: AudioDeviceID, volume: Float) {
+        var address = volumePropertyAddress()
+        var mutableVolume = Float32(clamp01(volume))
+        let dataSize = UInt32(MemoryLayout<Float32>.size)
+        AudioObjectSetPropertyData(deviceID, &address, 0, nil, dataSize, &mutableVolume)
+    }
+
+    private func volumePropertyAddress() -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+    }
+
     private func deviceName(deviceID: AudioDeviceID) -> String {
         stringProperty(deviceID: deviceID, selector: kAudioObjectPropertyName) ?? "Audio Device \(deviceID)"
     }
@@ -476,5 +598,9 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
             || lowerUID.contains("dualsense")
             || lowerUID.contains("wireless controller")
             || lowerUID.contains("sony")
+    }
+
+    private func clamp01(_ value: Float) -> Float {
+        max(0, min(1, value))
     }
 }

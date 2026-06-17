@@ -94,6 +94,10 @@ final class ControllerService: @unchecked Sendable {
         return hidService.setRumble(left: heavy, right: light, durationMs: request.durationMs)
     }
 
+    func setAudioVolume(_ request: AudioVolumeRequest) -> Bool {
+        hidService.setAudioVolume(headphone: request.headphone, speaker: request.speaker)
+    }
+
     func setMicMuteLED(on: Bool) -> Bool {
         hidService.setMicMuteLED(on: on)
     }

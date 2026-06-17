@@ -171,6 +171,23 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
+    func setAudioVolume(headphone: Float?, speaker: Float?) -> Bool {
+        let safeHeadphone = headphone.map { UInt8(clamping: Int(clamp01($0) * 255)) }
+        let safeSpeaker = speaker.map { UInt8(clamping: Int(clamp01($0) * 255)) }
+        return queue.sync {
+            guard let device, isOpen else {
+                statusText = "hid_not_open"
+                return false
+            }
+            let result = sendReport(.audioVolume(headphone: safeHeadphone, speaker: safeSpeaker), device: device)
+            statusText = result == kIOReturnSuccess
+                ? "audio_volume_headphone_\(safeHeadphone.map(String.init) ?? "unchanged")_speaker_\(safeSpeaker.map(String.init) ?? "unchanged")"
+                : "audio_volume_failed_\(String(format: "%08x", result))"
+            return result == kIOReturnSuccess
+        }
+    }
+
+    @discardableResult
     func setMicMuteLED(on: Bool) -> Bool {
         setMicMuteLED(control: on ? 1 : 0)
     }
@@ -262,6 +279,8 @@ final class DualSenseHIDService: @unchecked Sendable {
             DualSenseProtocol.apply(.lightbar(red: red, green: green, blue: blue, brightness: brightness), to: &state)
         case .adaptiveTrigger(let side, let mode, let params):
             DualSenseProtocol.apply(.adaptiveTrigger(side: side, mode: mode, params: params), to: &state)
+        case .audioVolume(let headphone, let speaker):
+            DualSenseProtocol.apply(.audioVolume(headphone: headphone, speaker: speaker), to: &state)
         }
         return DualSenseProtocol.bluetoothOutputReport(state: state, sequence: sequence)
     }
@@ -367,6 +386,8 @@ final class DualSenseHIDService: @unchecked Sendable {
             DualSenseProtocol.apply(.lightbar(red: red, green: green, blue: blue, brightness: brightness), to: &outputState)
         case .adaptiveTrigger(let side, let mode, let params):
             DualSenseProtocol.apply(.adaptiveTrigger(side: side, mode: mode, params: params), to: &outputState)
+        case .audioVolume(let headphone, let speaker):
+            DualSenseProtocol.apply(.audioVolume(headphone: headphone, speaker: speaker), to: &outputState)
         }
         var reportState = outputState
         reportState.validFlag0 = 0
@@ -383,6 +404,8 @@ final class DualSenseHIDService: @unchecked Sendable {
             DualSenseProtocol.apply(.lightbar(red: red, green: green, blue: blue, brightness: brightness), to: &reportState)
         case .adaptiveTrigger(let side, let mode, let params):
             DualSenseProtocol.apply(.adaptiveTrigger(side: side, mode: mode, params: params), to: &reportState)
+        case .audioVolume(let headphone, let speaker):
+            DualSenseProtocol.apply(.audioVolume(headphone: headphone, speaker: speaker), to: &reportState)
         }
         let sequence = nextOutputSequence()
         let report = DualSenseProtocol.bluetoothOutputReport(state: reportState, sequence: sequence)
@@ -517,6 +540,7 @@ private enum HIDOutputEffect {
     case micMuteLED(control: UInt8)
     case lightbar(red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?)
     case adaptiveTrigger(side: DualSenseTriggerSide, mode: UInt8, params: [UInt8])
+    case audioVolume(headphone: UInt8?, speaker: UInt8?)
 
     var intentName: String {
         switch self {
@@ -525,6 +549,7 @@ private enum HIDOutputEffect {
         case .micMuteLED: return "micMuteLED"
         case .lightbar: return "lightbar"
         case .adaptiveTrigger: return "adaptiveTrigger"
+        case .audioVolume: return "audioVolume"
         }
     }
 }

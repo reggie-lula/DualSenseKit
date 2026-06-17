@@ -139,6 +139,7 @@ public enum DualSenseOutputIntent: Equatable, Sendable {
     case rumble(leftMotor: UInt8, rightMotor: UInt8)
     case lightbar(red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8? = nil)
     case adaptiveTrigger(side: DualSenseTriggerSide, mode: UInt8, params: [UInt8])
+    case audioVolume(headphone: UInt8?, speaker: UInt8?)
     case resetEffects
 }
 
@@ -290,6 +291,15 @@ public enum DualSenseProtocol {
                 state.rightTriggerMode = mode
                 state.rightTriggerParams = padded
                 state.validFlag0 |= 0x04
+            }
+        case .audioVolume(let headphone, let speaker):
+            if let headphone {
+                state.headphoneVolume = headphone
+                state.validFlag0 |= 0x10
+            }
+            if let speaker {
+                state.speakerVolume = speaker
+                state.validFlag0 |= 0x20
             }
         case .resetEffects:
             state.leftMotor = 0

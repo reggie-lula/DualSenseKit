@@ -221,6 +221,50 @@ final class APIServer: @unchecked Sendable {
                 send(status: 400, json: ["error": "invalid_audio_request"], connection: connection)
             }
 
+        case ("GET", "/v1/audio/volume-state"):
+            let outputDeviceID = request.query["outputDeviceID"].flatMap(UInt32.init)
+            sendCodable(status: 200, value: audioService.volumeState(outputDeviceID: outputDeviceID), connection: connection)
+
+        case ("PUT", "/v1/audio/hid-volume"):
+            do {
+                let request = try JSONDecoder().decode(AudioVolumeRequest.self, from: request.body)
+                let ok = controllerService.setAudioVolume(request)
+                if ok {
+                    audioService.updateHIDVolumeCache(request)
+                }
+                let state = audioService.volumeState(outputDeviceID: nil)
+                let headphone = request.headphone.map { String($0) } ?? ""
+                let speaker = request.speaker.map { String($0) } ?? ""
+                let message = ok ? "DualSense HID audio volume report sent." : "DualSense HID audio volume report failed."
+                eventBus.publish(BridgeEvent(type: "audio.volume.hid", payload: [
+                    "ok": "\(ok)",
+                    "headphone": headphone,
+                    "speaker": speaker,
+                    "message": message
+                ]))
+                sendCodable(status: ok ? 200 : 409, value: state, connection: connection)
+            } catch {
+                send(status: 400, json: ["error": "invalid_audio_volume_request"], connection: connection)
+            }
+
+        case ("PUT", "/v1/audio/system-volume"):
+            do {
+                let request = try JSONDecoder().decode(SystemVolumeRequest.self, from: request.body)
+                let state = audioService.setSystemVolume(request)
+                let outputDeviceID = state.outputDeviceID.map { String($0) } ?? ""
+                let systemVolume = state.systemVolume.map { String($0) } ?? ""
+                eventBus.publish(BridgeEvent(type: "audio.volume.system.\(state.status.rawValue)", payload: [
+                    "outputDeviceID": outputDeviceID,
+                    "outputDeviceName": state.outputDeviceName ?? "",
+                    "volume": systemVolume,
+                    "writable": "\(state.systemVolumeWritable)",
+                    "message": state.message
+                ]))
+                sendCodable(status: state.status == .volumeSet ? 200 : 409, value: state, connection: connection)
+            } catch {
+                send(status: 400, json: ["error": "invalid_system_volume_request"], connection: connection)
+            }
+
         case ("GET", "/v1/audio/devices"):
             let devices = audioService.devices()
             eventBus.publish(BridgeEvent(type: "audio.device.scan", payload: [
@@ -533,6 +577,9 @@ final class APIServer: @unchecked Sendable {
                 <div id="audioStatus" class="audio-status">正在扫描 CoreAudio 设备...</div>
                 <div class="control-row compact"><label>输出端点</label><select id="audioOutputSelect"></select></div>
                 <div class="control-row compact"><label>输入端点</label><select id="audioInputSelect"></select></div>
+                <div class="control-row"><label>手柄扬声器音量</label><input id="hidSpeakerVolume" type="range" min="0" max="1" step="0.01" value="0.85"></div>
+                <div class="control-row"><label>手柄耳机音量</label><input id="hidHeadphoneVolume" type="range" min="0" max="1" step="0.01" value="0.65"></div>
+                <div class="control-row"><label>系统输出音量</label><input id="systemOutputVolume" type="range" min="0" max="1" step="0.01" value="0.5"></div>
                 <div class="control-row"><label>音频文件路径</label><input id="audioPath" type="text" placeholder="/Users/.../test.wav 或 .mp3/.m4a/.mp4"></div>
                 <div class="actions"><button id="refreshAudio">刷新音频设备</button><button id="playAudioFile">播放文件</button><button id="recordAudio3s">录制 3 秒</button><button id="stopAudioRecord">停止录音</button><button id="playRecordedAudio">播放录音</button></div>
                 <div id="audioRecordStatus" class="audio-note">录音：未开始</div>
@@ -624,6 +671,8 @@ final class APIServer: @unchecked Sendable {
           let currentPlayerBrightness = 0;
           let rumbleTimer = null;
           let triggerTimer = null;
+          let hidVolumeTimer = null;
+          let systemVolumeTimer = null;
           const touchState = { primary: null, secondary: null };
           function authHeaders(extra = {}) { return Object.assign({"Authorization": "Bearer " + TOKEN}, extra); }
           function nowTime() { return new Date().toLocaleTimeString("zh-CN", {hour12:false}) + "." + String(new Date().getMilliseconds()).padStart(3, "0"); }
@@ -773,6 +822,13 @@ final class APIServer: @unchecked Sendable {
             await fetch(endpoint, {method:"PUT", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify(body)});
             refreshStatus();
           }
+          async function putJSON(endpoint, body, action) {
+            uiAction(action, endpoint, body);
+            const response = await fetch(endpoint, {method:"PUT", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify(body || {})});
+            const json = await response.json().catch(() => ({}));
+            refreshStatus();
+            return json;
+          }
           async function postJSON(endpoint, body, action) {
             uiAction(action, endpoint, body);
             const response = await fetch(endpoint, {method:"POST", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify(body || {})});
@@ -805,6 +861,37 @@ final class APIServer: @unchecked Sendable {
             out.innerHTML = outputOptions.join("");
             input.innerHTML = inputOptions.join("");
             document.querySelector("#audioStatus").textContent = "DualSense 音频状态：" + devices.dualSenseAudioStatus + "；输出 " + (devices.outputs || []).length + " 个，输入 " + (devices.inputs || []).length + " 个";
+            await refreshVolumeState();
+          }
+          async function refreshVolumeState() {
+            const selected = document.querySelector("#audioOutputSelect").value;
+            const query = selected ? "?outputDeviceID=" + encodeURIComponent(selected) : "";
+            const state = await fetch("/v1/audio/volume-state" + query, {headers: authHeaders()}).then(r => r.json()).catch(() => null);
+            if (!state) return;
+            document.querySelector("#hidHeadphoneVolume").value = state.hidHeadphone ?? 0.65;
+            document.querySelector("#hidSpeakerVolume").value = state.hidSpeaker ?? 0.85;
+            if (state.systemVolume !== undefined && state.systemVolume !== null) {
+              document.querySelector("#systemOutputVolume").value = state.systemVolume;
+            }
+            document.querySelector("#systemOutputVolume").disabled = !state.systemVolumeWritable;
+            const statusRoot = document.querySelector("#audioStatus");
+            const baseStatus = statusRoot.textContent.split("；系统音量：")[0];
+            statusRoot.textContent = baseStatus + "；系统音量：" + (state.systemVolumeWritable ? "可调" : "不可调");
+          }
+          async function sendHIDAudioVolume() {
+            const body = {
+              speaker: Number(document.querySelector("#hidSpeakerVolume").value),
+              headphone: Number(document.querySelector("#hidHeadphoneVolume").value)
+            };
+            const result = await putJSON("/v1/audio/hid-volume", body, "audio.hidVolume");
+            document.querySelector("#audioRecordStatus").textContent = "HID 音量：" + (result.status || "sent") + " speaker=" + body.speaker.toFixed(2) + " headphone=" + body.headphone.toFixed(2);
+          }
+          async function sendSystemVolume() {
+            const selected = document.querySelector("#audioOutputSelect").value;
+            const body = {volume: Number(document.querySelector("#systemOutputVolume").value)};
+            if (selected) body.outputDeviceID = Number(selected);
+            const result = await putJSON("/v1/audio/system-volume", body, "audio.systemVolume");
+            document.querySelector("#audioRecordStatus").textContent = "系统音量：" + (result.status || "unknown") + " " + (result.message || "");
           }
           async function playAudioFile(pathOverride) {
             const selected = document.querySelector("#audioOutputSelect").value;
@@ -847,6 +934,15 @@ final class APIServer: @unchecked Sendable {
           document.querySelector("#lightbarColor").addEventListener("input", sendLightbar);
           document.querySelector("#micLEDMode").addEventListener("change", sendMicLED);
           document.querySelector("#refreshAudio").addEventListener("click", refreshAudioDevices);
+          document.querySelector("#audioOutputSelect").addEventListener("change", refreshVolumeState);
+          ["hidSpeakerVolume","hidHeadphoneVolume"].forEach(id => document.querySelector("#" + id).addEventListener("input", () => {
+            clearTimeout(hidVolumeTimer);
+            hidVolumeTimer = setTimeout(sendHIDAudioVolume, 80);
+          }));
+          document.querySelector("#systemOutputVolume").addEventListener("input", () => {
+            clearTimeout(systemVolumeTimer);
+            systemVolumeTimer = setTimeout(sendSystemVolume, 100);
+          });
           document.querySelector("#playAudioFile").addEventListener("click", () => playAudioFile(""));
           document.querySelector("#recordAudio3s").addEventListener("click", () => recordAudio(3000));
           document.querySelector("#stopAudioRecord").addEventListener("click", stopRecord);

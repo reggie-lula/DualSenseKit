@@ -342,6 +342,7 @@ enum AudioOperationStatus: String, Codable, Equatable, Sendable {
     case recording
     case notRecording
     case stopped
+    case volumeSet
     case failed
 }
 
@@ -358,6 +359,27 @@ struct PlayAudioResult: Codable, Equatable, Sendable {
     var outputDeviceID: UInt32?
     var outputDeviceName: String?
     var path: String?
+    var message: String
+}
+
+struct AudioVolumeRequest: Codable, Equatable, Sendable {
+    var headphone: Float? = nil
+    var speaker: Float? = nil
+}
+
+struct SystemVolumeRequest: Codable, Equatable, Sendable {
+    var outputDeviceID: UInt32? = nil
+    var volume: Float
+}
+
+struct AudioVolumeState: Codable, Equatable, Sendable {
+    var hidHeadphone: Float
+    var hidSpeaker: Float
+    var outputDeviceID: UInt32?
+    var outputDeviceName: String?
+    var systemVolume: Float?
+    var systemVolumeWritable: Bool
+    var status: AudioOperationStatus
     var message: String
 }
 

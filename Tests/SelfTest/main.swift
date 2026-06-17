@@ -62,6 +62,14 @@ struct SelfTest {
         let decodedRecordAudio = try JSONDecoder().decode(RecordAudioRequest.self, from: try JSONEncoder().encode(recordAudio))
         expect(decodedRecordAudio == recordAudio, "RecordAudioRequest should round-trip through JSON")
 
+        let audioVolume = AudioVolumeRequest(headphone: 0.65, speaker: 0.85)
+        let decodedAudioVolume = try JSONDecoder().decode(AudioVolumeRequest.self, from: try JSONEncoder().encode(audioVolume))
+        expect(decodedAudioVolume == audioVolume, "AudioVolumeRequest should round-trip through JSON")
+
+        let systemVolume = SystemVolumeRequest(outputDeviceID: 83, volume: 0.5)
+        let decodedSystemVolume = try JSONDecoder().decode(SystemVolumeRequest.self, from: try JSONEncoder().encode(systemVolume))
+        expect(decodedSystemVolume == systemVolume, "SystemVolumeRequest should round-trip through JSON")
+
         let audioDevices = AudioDevicesResponse(
             inputs: [],
             outputs: [],
@@ -193,6 +201,16 @@ struct SelfTest {
         expect(rumbleReport[5] == 192, "rumble report should set right motor byte")
         expect(rumbleReport[6] == 64, "rumble report should set left motor byte")
         expect(rumbleReport[46] == 0, "rumble report should not set player LED bytes")
+
+        var audioVolumeState = DualSenseOutputState()
+        DualSenseProtocol.apply(.audioVolume(headphone: 166, speaker: 217), to: &audioVolumeState)
+        let audioVolumeReport = DualSenseProtocol.bluetoothOutputReport(state: audioVolumeState)
+        expect((audioVolumeReport[3] & 0x10) != 0, "audio volume report should enable headphone volume flag")
+        expect((audioVolumeReport[3] & 0x20) != 0, "audio volume report should enable speaker volume flag")
+        expect(audioVolumeReport[7] == 166, "audio volume report should set headphone volume byte")
+        expect(audioVolumeReport[8] == 217, "audio volume report should set speaker volume byte")
+        expect(audioVolumeReport[5] == 0 && audioVolumeReport[6] == 0, "audio volume report should not set motor bytes")
+        expect(audioVolumeReport[46] == 0, "audio volume report should not set player LED bytes")
 
         _ = AudioService().outputDevices()
 
