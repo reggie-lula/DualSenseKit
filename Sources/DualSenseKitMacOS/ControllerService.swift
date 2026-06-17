@@ -85,9 +85,7 @@ final class ControllerService: @unchecked Sendable {
     func setRumble(_ request: RumbleRequest) -> Bool {
         let heavy = request.heavy ?? request.left ?? 0
         let light = request.light ?? request.right ?? 0
-        // On DualSense HID output reports, the byte named "right motor" is the strong/heavy
-        // actuator on the hardware we are targeting; expose the UI in hardware terms.
-        return hidService.setRumble(left: light, right: heavy, durationMs: request.durationMs)
+        return hidService.setRumble(left: heavy, right: light, durationMs: request.durationMs)
     }
 
     func setMicMuteLED(on: Bool) -> Bool {
@@ -106,12 +104,15 @@ final class ControllerService: @unchecked Sendable {
     }
 
     func setLightbar(_ request: LightbarRequest) -> Bool {
-        let brightness = request.brightness.map { UInt8(clamping: Int(clamp01($0) * 2)) }
+        let scale = clamp01(request.brightness ?? 1)
+        let red = UInt8(clamping: Int(Float(request.r ?? 0) * scale))
+        let green = UInt8(clamping: Int(Float(request.g ?? 0) * scale))
+        let blue = UInt8(clamping: Int(Float(request.b ?? 0) * scale))
         return hidService.setLightbar(
-            red: request.r ?? 0,
-            green: request.g ?? 0,
-            blue: request.b ?? 0,
-            brightness: brightness
+            red: red,
+            green: green,
+            blue: blue,
+            brightness: nil
         )
     }
 

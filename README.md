@@ -1,6 +1,6 @@
 # DualSenseKit
 
-DualSenseKit is a Swift SDK for parsing and controlling Sony DualSense controllers, with a macOS MVP demo app for local hardware testing.
+DualSenseKit is a Swift SDK for parsing Sony DualSense reports, plus a macOS SDK layer for safe controller input, lighting, touchpad, and audio-device integration.
 
 ## Features
 
@@ -10,11 +10,12 @@ DualSenseKit is a Swift SDK for parsing and controlling Sony DualSense controlle
 - Provides local HTTP and WebSocket APIs on `127.0.0.1:17395`.
 - Controls controller RGB light through Apple's `GameController` light API when available.
 - Keeps controller lighting as backend state so browser refresh, focus changes, and WebSocket reconnects do not reset hardware effects.
-- Provides a local browser hardware test panel at `http://127.0.0.1:17395/test`.
+- Provides a local browser hardware test panel at `http://127.0.0.1:17395/test` for conservative hardware verification.
 - Adds a minimal DualSense HID path for the microphone mute button and 5 white player LEDs.
 - Includes `DualSenseKit`, a reusable Swift protocol layer for DualSense HID input parsing and output report encoding.
+- Includes `DualSenseKitMacOS`, a macOS SDK layer for device lifecycle, input events, lighting, rumble, and DualSense audio-device discovery.
 - Detects DualSense audio capability, reports virtual-driver status, and falls back cleanly when controller audio transport is unavailable.
-- Runs as an accessory/menu-bar app with no Dock icon.
+- Keeps the demo/server as a hardware verification tool rather than the public SDK surface.
 
 ## Build
 
@@ -67,7 +68,7 @@ This CLT install does not include `XCTest` or Swift Testing modules. Use the dep
 scripts/test.sh
 ```
 
-It verifies config JSON round-tripping, RGB/player LED payloads, shell whitelist behavior, touchpad delta mapping, gesture timing, and HID special-button parsing.
+It verifies config JSON round-tripping, RGB/player LED payloads, shell whitelist behavior, touchpad delta mapping, gesture timing, HID special-button parsing, and Bluetooth output report snapshots.
 
 ## SDK
 
@@ -144,22 +145,26 @@ Read the backend-persistent lighting state:
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:17395/v1/light/state
 ```
 
-Probe raw player LED brightness values:
+## Conservative Bluetooth Lighting Recovery
+
+If a controller stops accepting Bluetooth lightbar or player LED changes, use only the conservative path below. Do not scan raw player LED brightness values.
+
+1. Verify USB first with a known-safe lightbar color and player LED mask.
+2. Re-pair over Bluetooth.
+3. Send only lightbar RGB, player LED mask, and mic LED off/on. The default player LED path omits the brightness byte.
+4. Check the diagnostics log for the exact HID output report hex before trying any further recovery.
 
 ```sh
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  --data '{"mask":31,"start":0,"end":255,"step":1,"dwellMs":40}' \
-  http://127.0.0.1:17395/v1/light/player-leds/probe
-```
-
-Run the MVP light sequence:
-
-```sh
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:17395/v1/test/light-sequence
+TOKEN="$(cat ~/Library/Application\ Support/DualSenseKitDemo/api-token)"
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  --data '{"r":0,"g":64,"b":255,"brightness":1}' \
+  http://127.0.0.1:17395/v1/light/lightbar
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  --data '{"mask":4}' \
+  http://127.0.0.1:17395/v1/light/player-leds
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  --data '{"mode":"off"}' \
+  http://127.0.0.1:17395/v1/light/mic-mute
 ```
 
 List audio devices and virtual driver status:
@@ -203,13 +208,12 @@ The server rejects accepted connections whose remote endpoint is not loopback.
 - `PUT /v1/light` with `{"r":255,"g":80,"b":0}`
 - `PUT /v1/light/lightbar` with `{"r":0,"g":255,"b":0,"brightness":1.0}`
 - `PUT /v1/light/state` with lightbar, player LED, mic LED, and animation state in one payload
-- `PUT /v1/light/player-leds` with `{"mask":31,"brightness":0}`. Player LEDs are treated as white indicators; raw brightness probing is available, but linear brightness and color are not enabled until verified on hardware.
+- `PUT /v1/light/player-leds` with `{"mask":31,"brightness":0}`. Player LEDs are treated as white indicators. Brightness is restricted to known safe values `0...2`, and the default path omits the brightness byte entirely.
 - `PUT /v1/light/mic-mute` with `{"mode":"off"|"on"|"breathe"}` or legacy `{"on":true}`
-- `POST /v1/light/player-leds/probe` with `{"mask":31,"start":0,"end":255,"step":1,"dwellMs":40}`
-- `POST /v1/light/animation` with `{"enabled":true,"target":"lightbar","kind":"breathe","periodMs":1600}`
+- `POST /v1/light/animation` is disabled for hardware safety and returns `410`.
 - `PUT /v1/haptics/rumble` with `{"heavy":0.4,"light":0.2,"durationMs":1000}`; legacy `left/right` is still accepted
 - `PUT /v1/triggers` with `{"left":{"mode":"feedback"|"weapon"|"vibration"|"slopeFeedback"|"off","startPosition":0.1,"endPosition":0.8,"strength":0.5,"frequency":10},"right":{"mode":"off"}}`
-- `POST /v1/test/light-sequence`
+- `POST /v1/test/light-sequence` is disabled for hardware safety and returns `410`.
 - `POST /v1/test/reset-effects`
 - `POST /v1/audio/play`
 - `GET /v1/audio/outputs`

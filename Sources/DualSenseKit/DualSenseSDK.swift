@@ -62,7 +62,7 @@ public struct DualSenseInputReport: Sendable {
 
 public struct DualSenseOutputState: Equatable, Sendable {
     public var validFlag0: UInt8 = 0
-    public var validFlag1: UInt8 = 0xf7
+    public var validFlag1: UInt8 = 0
     public var rightMotor: UInt8 = 0
     public var leftMotor: UInt8 = 0
     public var headphoneVolume: UInt8 = 0
@@ -211,7 +211,7 @@ public enum DualSenseProtocol {
         case .playerLEDs(let mask, let brightness):
             state.playerIndicator = mask & 0x1f
             if let brightness {
-                state.ledBrightness = brightness
+                state.ledBrightness = min(brightness, 2)
                 state.validFlag2 |= 0x01
             }
             state.validFlag1 |= 0x10

@@ -10,12 +10,12 @@ let package = Package(
     products: [
         .executable(name: "DualSenseKitDemo", targets: ["DualSenseKitDemo"]),
         .library(name: "DualSenseKit", targets: ["DualSenseKit"]),
-        .library(name: "DualSenseKitDemoCore", targets: ["DualSenseKitDemoCore"])
+        .library(name: "DualSenseKitMacOS", targets: ["DualSenseKitMacOS"])
     ],
     targets: [
         .target(name: "DualSenseKit"),
         .target(
-            name: "DualSenseKitDemoCore",
+            name: "DualSenseKitMacOS",
             dependencies: ["DualSenseKit"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -31,7 +31,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "DualSenseKitDemo",
-            dependencies: ["DualSenseKitDemoCore"]
+            dependencies: ["DualSenseKitMacOS"]
         )
     ]
 )

@@ -59,12 +59,8 @@ final class LightService: @unchecked Sendable {
         let newState = queue.sync { () -> LightingState in
             var next = lightingState
             next.playerLEDs.mask = request.mask & 0x1f
-            if let brightnessLinear = request.brightnessLinear {
-                next.playerLEDs.brightnessLinear = clamp01(brightnessLinear)
-                next.playerLEDs.brightness = UInt8(clamping: Int((1 - clamp01(brightnessLinear)) * 2))
-            } else if let brightness = request.brightness {
+            if let brightness = request.brightness {
                 next.playerLEDs.brightness = min(brightness, 2)
-                next.playerLEDs.brightnessLinear = nil
             }
             lightingState = next
             return next
@@ -83,16 +79,12 @@ final class LightService: @unchecked Sendable {
 
     func setAnimation(_ request: LightingAnimationRequest) -> LightingState {
         animationWorkItem?.cancel()
-        let period = max(300, min(request.periodMs ?? 1600, 10000))
         queue.sync {
             lightingState.animation = LightingAnimationState(
-                enabled: request.enabled,
+                enabled: false,
                 target: request.target ?? "lightbar",
-                periodMs: period
+                periodMs: max(300, min(request.periodMs ?? 1600, 10000))
             )
-        }
-        if request.enabled {
-            startLightbarAnimation(periodMs: period)
         }
         return state()
     }
@@ -106,35 +98,6 @@ final class LightService: @unchecked Sendable {
         }
         _ = controllerService?.setPlayerLEDs(mask: 0, brightness: nil)
         _ = controllerService?.setMicMuteLED(MicMuteLEDRequest(on: nil, mode: .off))
-    }
-
-    func probePlayerLEDs(_ request: PlayerLEDProbeRequest) -> PlayerLEDProbeResult {
-        let start = request.start ?? 0
-        let end = request.end ?? 255
-        let step = max(1, request.step ?? 16)
-        let dwell = max(20, min(request.dwellMs ?? 80, 1000))
-        let mask = (request.mask ?? max(state().playerLEDs.mask, 0x04)) & 0x1f
-        var tested: [UInt8] = []
-        var value = start
-        while value <= end {
-            tested.append(value)
-            _ = controllerService?.setPlayerLEDs(mask: mask, brightness: value)
-            eventBus?.publish(BridgeEvent(type: "light.playerLEDs.probe", payload: [
-                "brightness": "\(value)",
-                "mask": "\(mask)"
-            ]))
-            Thread.sleep(forTimeInterval: Double(dwell) / 1000)
-            if UInt16(value) + UInt16(step) > UInt16(UInt8.max) { break }
-            value += step
-            if value == 0 { break }
-        }
-        _ = setPlayerLEDs(PlayerLEDRequest(mask: state().playerLEDs.mask, brightness: state().playerLEDs.brightness))
-        return PlayerLEDProbeResult(
-            testedValues: tested,
-            linearBrightnessSupported: false,
-            colorSupported: false,
-            note: "Probe sends only the documented player LED brightness byte. Current SDK treats confirmed behavior as three-level white indicators until manual observation proves otherwise."
-        )
     }
 
     private func applyCurrentState() -> Bool {
@@ -189,7 +152,6 @@ final class LightService: @unchecked Sendable {
         copy.lightbar.brightness = clamp01(copy.lightbar.brightness)
         copy.playerLEDs.mask &= 0x1f
         copy.playerLEDs.brightness = min(copy.playerLEDs.brightness, 2)
-        copy.playerLEDs.brightnessLinear = copy.playerLEDs.brightnessLinear.map(clamp01)
         copy.playerLEDs.linearBrightnessSupported = false
         copy.playerLEDs.colorSupported = false
         copy.animation.periodMs = max(300, min(copy.animation.periodMs, 10000))

@@ -1,4 +1,4 @@
-import DualSenseKitDemoCore
+import DualSenseKitMacOS
 
 @main
 struct DualSenseKitDemoMain {

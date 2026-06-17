@@ -28,10 +28,10 @@ xcrun swiftc \
     -target arm64-apple-macosx13.0 \
     -sdk "$SDK_PATH" \
     -I "$BUILD_DIR" \
-    -module-name DualSenseKitDemoCore \
+    -module-name DualSenseKitMacOS \
     -emit-module \
-    -emit-module-path "$BUILD_DIR/DualSenseKitDemoCore.swiftmodule" \
-    -c "$ROOT"/Sources/DualSenseKitDemoCore/*.swift
+    -emit-module-path "$BUILD_DIR/DualSenseKitMacOS.swiftmodule" \
+    -c "$ROOT"/Sources/DualSenseKitMacOS/*.swift
 )
 
 xcrun swiftc \

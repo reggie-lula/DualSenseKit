@@ -209,27 +209,11 @@ final class APIServer: @unchecked Sendable {
                 send(status: 400, json: ["error": "invalid_light_state"], connection: connection)
             }
 
-        case ("POST", "/v1/light/player-leds/probe"):
-            do {
-                let probe = request.body.isEmpty
-                    ? PlayerLEDProbeRequest()
-                    : try JSONDecoder().decode(PlayerLEDProbeRequest.self, from: request.body)
-                sendCodable(status: 200, value: lightService.probePlayerLEDs(probe), connection: connection)
-            } catch {
-                send(status: 400, json: ["error": "invalid_player_led_probe"], connection: connection)
-            }
-
         case ("POST", "/v1/light/animation"):
-            do {
-                let request = try JSONDecoder().decode(LightingAnimationRequest.self, from: request.body)
-                sendCodable(status: 200, value: lightService.setAnimation(request), connection: connection)
-            } catch {
-                send(status: 400, json: ["error": "invalid_light_animation"], connection: connection)
-            }
+            send(status: 410, json: ["error": "light_animation_disabled_for_hardware_safety"], connection: connection)
 
         case ("POST", "/v1/test/light-sequence"):
-            runLightSequence()
-            send(status: 200, json: ["ok": "true"], connection: connection)
+            send(status: 410, json: ["error": "light_sequence_disabled_for_hardware_safety"], connection: connection)
 
         case ("POST", "/v1/test/reset-effects"):
             controllerService.resetEffects()
@@ -380,35 +364,6 @@ final class APIServer: @unchecked Sendable {
         return frame
     }
 
-    private func runLightSequence() {
-        DispatchQueue.global(qos: .userInitiated).async { [lightService, eventBus] in
-            let colors = [
-                LightbarRequest(r: 255, g: 0, b: 0, brightness: 1),
-                LightbarRequest(r: 0, g: 255, b: 0, brightness: 1),
-                LightbarRequest(r: 0, g: 0, b: 255, brightness: 1),
-                LightbarRequest(r: 255, g: 255, b: 255, brightness: 1),
-                LightbarRequest(r: 0, g: 0, b: 0, brightness: 1)
-            ]
-            for color in colors {
-                _ = lightService.setLightbar(color)
-                eventBus.publish(BridgeEvent(type: "test.light.rgb", payload: [
-                    "r": "\(color.r ?? 0)",
-                    "g": "\(color.g ?? 0)",
-                    "b": "\(color.b ?? 0)"
-                ]))
-                Thread.sleep(forTimeInterval: 0.45)
-            }
-            for mask in [UInt8(1), 2, 4, 8, 16, 31, 0] {
-                let ok = lightService.setPlayerLEDs(PlayerLEDRequest(mask: mask, brightness: lightService.state().playerLEDs.brightness))
-                eventBus.publish(BridgeEvent(type: "test.light.playerLEDs", payload: [
-                    "mask": "\(mask)",
-                    "ok": "\(ok)"
-                ]))
-                Thread.sleep(forTimeInterval: 0.45)
-            }
-        }
-    }
-
     private func testPageHTML() -> String {
         let token = tokenService.token()
         return """
@@ -430,6 +385,8 @@ final class APIServer: @unchecked Sendable {
             .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 999px; background: color-mix(in srgb, CanvasText 8%, transparent); font-size: 13px; }
             .ok { color: #16833a; }
             .bad { color: #c53030; }
+            .warning { display: none; margin-top: 10px; padding: 9px 10px; border-radius: 6px; border: 1px solid color-mix(in srgb, #c53030 42%, transparent); background: color-mix(in srgb, #c53030 10%, transparent); color: CanvasText; font-size: 13px; }
+            .warning.show { display: block; }
             .button-row { display: grid; grid-template-columns: 150px repeat(3, 1fr); gap: 6px; align-items: center; font-size: 13px; }
             .cell { min-height: 28px; border-radius: 6px; display: grid; place-items: center; background: color-mix(in srgb, CanvasText 7%, transparent); }
             .cell.pass { background: color-mix(in srgb, #21a366 26%, transparent); color: CanvasText; }
@@ -457,13 +414,13 @@ final class APIServer: @unchecked Sendable {
             </section>
             <section>
               <h2>灯光测试</h2>
+              <div id="hidWarningLight" class="warning">HID 写入当前不可用，状态灯和静音灯可能不会响应。请查看状态区的 HID transport/status。</div>
               <div class="actions">
                 <button data-rgb="255,0,0">红</button>
                 <button data-rgb="0,255,0">绿</button>
                 <button data-rgb="0,0,255">蓝</button>
                 <button data-rgb="255,255,255">白</button>
                 <button data-rgb="0,0,0">关闭 RGB</button>
-                <button id="sequence">运行序列</button>
               </div>
               <div class="actions" style="margin-top:10px">
                 <button data-mask="4">玩家 1</button>
@@ -474,7 +431,7 @@ final class APIServer: @unchecked Sendable {
                 <button data-mask="0">全灭</button>
               </div>
               <div class="control-grid" style="margin-top:10px">
-                <label>状态灯亮度 <span id="playerBrightnessValue">硬件未确认</span><input id="playerBrightness" type="range" min="0" max="2" step="1" value="0" disabled></label>
+                <label>状态灯亮度 <span id="playerBrightnessValue">亮度写入已禁用</span><input id="playerBrightness" type="range" min="0" max="2" step="1" value="0" disabled></label>
                 <label>警灯亮度 <span id="lightbarBrightnessValue">1.00</span><input id="lightbarBrightness" type="range" min="0" max="1" step="0.01" value="1"></label>
                 <label>静音灯
                   <select id="micLEDMode">
@@ -492,14 +449,12 @@ final class APIServer: @unchecked Sendable {
                 <label><input type="checkbox" class="playerCheck" value="4">灯 3</label>
               </div>
               <div class="actions" style="margin-top:10px">
-                <button id="probePlayerLEDs">扫描状态灯亮度 0...255</button>
-                <button id="stopLightAnimation">停止灯光动画</button>
-                <button id="startLightbarBreathing">警灯线性呼吸</button>
               </div>
               <pre id="lightProbe"></pre>
             </section>
             <section>
               <h2>马达与扳机</h2>
+              <div id="hidWarningHaptics" class="warning">HID 写入当前不可用，马达和扳机可能不会响应。请查看状态区的 HID transport/status。</div>
               <div class="control-grid">
                 <label>重马达 <span id="heavyRumbleValue">0</span><input id="heavyRumble" type="range" min="0" max="1" step="0.01" value="0"></label>
                 <label>轻马达 <span id="lightRumbleValue">0</span><input id="lightRumble" type="range" min="0" max="1" step="0.01" value="0"></label>
@@ -531,6 +486,8 @@ final class APIServer: @unchecked Sendable {
                 <label>R2 频率 <span id="rightTriggerFrequencyValue">10</span><input id="rightTriggerFrequency" type="range" min="0" max="30" step="1" value="10"></label>
               </div>
               <div class="actions" style="margin-top:10px">
+                <button id="pulseHeavyRumble">重马达脉冲</button>
+                <button id="pulseLightRumble">轻马达脉冲</button>
                 <button id="stopRumble">停止震动</button>
                 <button id="disableTriggers">关闭扳机</button>
                 <button id="resetEffects">复位手柄效果</button>
@@ -591,10 +548,14 @@ final class APIServer: @unchecked Sendable {
               ["手柄", status.connectedController || "未连接", !!status.connectedController],
               ["辅助功能", String(status.accessibilityTrusted), status.accessibilityTrusted],
               ["HID", status.hidStatus, status.hidConnected],
+              ["HID 传输", controller && controller.hid && controller.hid.transport || "unknown", controller && controller.hid && !!controller.hid.transport],
               ["HID 写入", String(status.hidWritable), status.hidWritable],
               ["GameController Light", controller && String(controller.supportsLight), controller && controller.supportsLight],
               ["DualSense Profile", controller && String(controller.isDualSenseProfile), controller && controller.isDualSenseProfile]
             ].map(([k,v,ok]) => '<span class="pill"><strong>' + k + '</strong><span class="' + (ok ? 'ok' : 'bad') + '">' + v + '</span></span>').join('');
+            const hidWritable = !!status.hidWritable;
+            document.querySelector("#hidWarningLight").classList.toggle("show", !hidWritable);
+            document.querySelector("#hidWarningHaptics").classList.toggle("show", !hidWritable);
           }
           async function loadRecent() {
             const recent = await fetch("/v1/events/recent", {headers: authHeaders()}).then(r => r.json()).catch(() => []);
@@ -759,32 +720,6 @@ final class APIServer: @unchecked Sendable {
             if (mask !== undefined) {
               await sendPlayerMask(Number(mask));
             }
-            if (event.target.id === "sequence") {
-              await fetch("/v1/test/light-sequence", {method:"POST", headers: authHeaders()});
-            }
-            if (event.target.id === "probePlayerLEDs") {
-              const result = await fetch("/v1/light/player-leds/probe", {
-                method:"POST",
-                headers: authHeaders({"Content-Type":"application/json"}),
-                body: JSON.stringify({mask: currentPlayerMask || 4, start: 0, end: 255, step: 16, dwellMs: 80})
-              }).then(r => r.json());
-              document.querySelector("#lightProbe").textContent = JSON.stringify(result, null, 2);
-            }
-            if (event.target.id === "startLightbarBreathing") {
-              await fetch("/v1/light/animation", {
-                method:"POST",
-                headers: authHeaders({"Content-Type":"application/json"}),
-                body: JSON.stringify({enabled:true, target:"lightbar", periodMs:1600})
-              });
-            }
-            if (event.target.id === "stopLightAnimation") {
-              await fetch("/v1/light/animation", {
-                method:"POST",
-                headers: authHeaders({"Content-Type":"application/json"}),
-                body: JSON.stringify({enabled:false})
-              });
-              await sendLightbar();
-            }
             if (event.target.id === "refreshAudio") {
               await refreshAudio();
             }
@@ -798,6 +733,16 @@ final class APIServer: @unchecked Sendable {
               updateValue("heavyRumble");
               updateValue("lightRumble");
               await sendRumble(0, 0, 0);
+            }
+            if (event.target.id === "pulseHeavyRumble") {
+              setRange("heavyRumble", 0.75);
+              setRange("lightRumble", 0);
+              await sendRumble(0.75, 0, 650);
+            }
+            if (event.target.id === "pulseLightRumble") {
+              setRange("heavyRumble", 0);
+              setRange("lightRumble", 0.75);
+              await sendRumble(0, 0.75, 650);
             }
             if (event.target.id === "disableTriggers") {
               document.querySelector("#leftTriggerMode").value = "off";

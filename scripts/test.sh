@@ -31,7 +31,7 @@ xcrun swiftc \
     -module-name DualSenseKitSelfTest \
     -emit-module \
     -emit-module-path "$BUILD_DIR/DualSenseKitSelfTest.swiftmodule" \
-    -c "$ROOT"/Sources/DualSenseKitDemoCore/*.swift "$ROOT/Tests/SelfTest/main.swift"
+    -c "$ROOT"/Sources/DualSenseKitMacOS/*.swift "$ROOT/Tests/SelfTest/main.swift"
 )
 
 xcrun clang \

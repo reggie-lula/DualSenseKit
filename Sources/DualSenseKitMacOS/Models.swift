@@ -199,7 +199,6 @@ struct RGBColorRequest: Codable, Equatable, Sendable {
 struct PlayerLEDRequest: Codable, Equatable, Sendable {
     var mask: UInt8
     var brightness: UInt8? = nil
-    var brightnessLinear: Float? = nil
 }
 
 struct MicMuteLEDRequest: Codable, Equatable, Sendable {
@@ -230,10 +229,9 @@ struct LightbarState: Codable, Equatable, Sendable {
 struct PlayerLEDState: Codable, Equatable, Sendable {
     var mask: UInt8 = 0
     var brightness: UInt8 = 0
-    var brightnessLinear: Float? = nil
     var linearBrightnessSupported: Bool = false
     var colorSupported: Bool = false
-    var limitation: String = "player LEDs are treated as white indicators until HID probing proves otherwise"
+    var limitation: String = "player LEDs are treated as white indicators; brightness writes are limited to known safe values 0...2"
 }
 
 struct MicLEDState: Codable, Equatable, Sendable {
@@ -257,29 +255,6 @@ struct LightingAnimationRequest: Codable, Equatable, Sendable {
     var enabled: Bool
     var target: String? = nil
     var periodMs: Int? = nil
-}
-
-struct PlayerLEDProbeRequest: Codable, Equatable, Sendable {
-    var mask: UInt8? = nil
-    var start: UInt8? = nil
-    var end: UInt8? = nil
-    var step: UInt8? = nil
-    var dwellMs: Int? = nil
-
-    init(mask: UInt8? = nil, start: UInt8? = nil, end: UInt8? = nil, step: UInt8? = nil, dwellMs: Int? = nil) {
-        self.mask = mask
-        self.start = start
-        self.end = end
-        self.step = step
-        self.dwellMs = dwellMs
-    }
-}
-
-struct PlayerLEDProbeResult: Codable, Equatable, Sendable {
-    var testedValues: [UInt8]
-    var linearBrightnessSupported: Bool
-    var colorSupported: Bool
-    var note: String
 }
 
 struct RumbleRequest: Codable, Equatable, Sendable {
