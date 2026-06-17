@@ -41,22 +41,53 @@ public struct DualSenseTouchPoint: Equatable, Sendable {
     }
 }
 
+public struct DualSenseMotion: Equatable, Sendable {
+    public var gyroX: Int16
+    public var gyroY: Int16
+    public var gyroZ: Int16
+    public var accelX: Int16
+    public var accelY: Int16
+    public var accelZ: Int16
+    public var timestamp: UInt32?
+
+    public init(
+        gyroX: Int16,
+        gyroY: Int16,
+        gyroZ: Int16,
+        accelX: Int16,
+        accelY: Int16,
+        accelZ: Int16,
+        timestamp: UInt32?
+    ) {
+        self.gyroX = gyroX
+        self.gyroY = gyroY
+        self.gyroZ = gyroZ
+        self.accelX = accelX
+        self.accelY = accelY
+        self.accelZ = accelZ
+        self.timestamp = timestamp
+    }
+}
+
 public struct DualSenseInputReport: Sendable {
     public var axes: [String: Float]
     public var hat: UInt8
     public var buttons: [(DualSenseButton, Bool)]
     public var touchPoints: [DualSenseTouchPoint]
+    public var motion: DualSenseMotion?
 
     public init(
         axes: [String: Float],
         hat: UInt8,
         buttons: [(DualSenseButton, Bool)],
-        touchPoints: [DualSenseTouchPoint]
+        touchPoints: [DualSenseTouchPoint],
+        motion: DualSenseMotion? = nil
     ) {
         self.axes = axes
         self.hat = hat
         self.buttons = buttons
         self.touchPoints = touchPoints
+        self.motion = motion
     }
 }
 
@@ -163,6 +194,17 @@ public enum DualSenseProtocol {
             touchPoints.append(parseTouchPoint(bytes, offset: touchStart))
             touchPoints.append(parseTouchPoint(bytes, offset: touchStart + 4))
         }
+        let motion = bytes.count > offset + 30
+            ? DualSenseMotion(
+                gyroX: int16LE(bytes, offset + 15),
+                gyroY: int16LE(bytes, offset + 17),
+                gyroZ: int16LE(bytes, offset + 19),
+                accelX: int16LE(bytes, offset + 21),
+                accelY: int16LE(bytes, offset + 23),
+                accelZ: int16LE(bytes, offset + 25),
+                timestamp: uint32LE(bytes, offset + 27)
+            )
+            : nil
         return DualSenseInputReport(
             axes: [
                 "leftStickX": normalizeThumbStickAxis(bytes[offset + 0]),
@@ -174,7 +216,8 @@ public enum DualSenseProtocol {
             ],
             hat: buttons0 & 0x0f,
             buttons: buttons,
-            touchPoints: touchPoints
+            touchPoints: touchPoints,
+            motion: motion
         )
     }
 
@@ -309,6 +352,18 @@ public enum DualSenseProtocol {
             y: min(1, Float(yRaw) / 1080),
             active: active
         )
+    }
+
+    private static func int16LE(_ bytes: [UInt8], _ index: Int) -> Int16 {
+        let value = UInt16(bytes[index]) | (UInt16(bytes[index + 1]) << 8)
+        return Int16(bitPattern: value)
+    }
+
+    private static func uint32LE(_ bytes: [UInt8], _ index: Int) -> UInt32 {
+        UInt32(bytes[index])
+            | (UInt32(bytes[index + 1]) << 8)
+            | (UInt32(bytes[index + 2]) << 16)
+            | (UInt32(bytes[index + 3]) << 24)
     }
 
     private static func writeBluetoothCRC(to report: inout Data) {

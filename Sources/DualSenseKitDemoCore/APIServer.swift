@@ -155,7 +155,7 @@ final class APIServer: @unchecked Sendable {
                     send(status: 400, json: ["error": "invalid_player_led_mask"], connection: connection)
                     return
                 }
-                let ok = controllerService.setPlayerLEDs(mask: request.mask)
+                let ok = controllerService.setPlayerLEDs(mask: request.mask, brightness: request.brightness)
                 send(status: ok ? 200 : 409, json: ["ok": "\(ok)"], connection: connection)
             } catch {
                 send(status: 400, json: ["error": "invalid_player_led_request"], connection: connection)
@@ -377,147 +377,290 @@ final class APIServer: @unchecked Sendable {
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>DualSenseKitDemo Test</title>
+          <title>DualSenseKit Visual Test</title>
           <style>
-            :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-            body { margin: 0; background: Canvas; color: CanvasText; }
-            header { position: sticky; top: 0; padding: 14px 18px; border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, transparent); background: Canvas; z-index: 2; }
-            h1 { margin: 0; font-size: 20px; }
-            main { max-width: 1180px; margin: 0 auto; padding: 18px; display: grid; gap: 18px; }
-            section { border: 1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius: 8px; padding: 14px; }
-            h2 { margin: 0 0 12px; font-size: 15px; }
-            .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-            .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 999px; background: color-mix(in srgb, CanvasText 8%, transparent); font-size: 13px; }
-            .ok { color: #16833a; }
-            .bad { color: #c53030; }
-            .button-row { display: grid; grid-template-columns: 150px repeat(3, 1fr); gap: 6px; align-items: center; font-size: 13px; }
-            .cell { min-height: 28px; border-radius: 6px; display: grid; place-items: center; background: color-mix(in srgb, CanvasText 7%, transparent); }
-            .cell.pass { background: color-mix(in srgb, #21a366 26%, transparent); color: CanvasText; }
-            button { min-height: 32px; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); background: ButtonFace; color: ButtonText; }
+            :root {
+              color-scheme: light;
+              --blue: #2f80ed;
+              --blue-weak: #d6e6ff;
+              --red: #ff4d4f;
+              --orange: #ffad4d;
+              --ink: #30343b;
+              --muted: #6b7280;
+              --line: #d7dde8;
+              --panel: #ffffff;
+              --bg: #f7faff;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }
+            * { box-sizing: border-box; }
+            body { margin: 0; background: var(--bg); color: var(--ink); }
+            header { height: 52px; display: flex; align-items: center; padding: 0 18px; border-bottom: 1px solid var(--line); background: #fff; }
+            h1 { margin: 0; color: var(--blue); font-size: 18px; }
+            h2 { margin: 0 0 12px; color: var(--blue); font-size: 18px; border-left: 5px solid var(--blue); padding-left: 8px; }
+            h3 { margin: 0 0 8px; color: var(--blue); font-size: 14px; }
+            button, select, input[type="color"] { min-height: 30px; border-radius: 999px; border: 1px solid var(--blue-weak); background: #fff; color: var(--blue); font-weight: 600; }
+            button { padding: 0 12px; }
+            button.active, button:active { background: var(--blue); color: #fff; }
+            input[type="range"] { width: 100%; accent-color: var(--blue); }
+            label { color: var(--blue); font-weight: 700; font-size: 14px; }
+            .workspace { min-height: calc(100vh - 52px); display: grid; grid-template-columns: 360px minmax(700px, 1fr); gap: 14px; padding: 14px; }
+            .side-panel, .preview-panel { min-width: 0; }
+            .module { background: var(--panel); border: 1px solid var(--line); border-radius: 24px; padding: 16px 18px; margin-bottom: 14px; }
+            .status-grid { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; color: var(--blue); font-weight: 700; }
             .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-            .control-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
-            label { display: grid; gap: 6px; font-size: 13px; }
-            input[type="range"] { width: 100%; }
-            select { min-height: 32px; border-radius: 6px; }
-            .checks { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-            .checks label { display: inline-flex; grid-template-columns: none; align-items: center; gap: 4px; }
-            pre { margin: 0; max-height: 260px; overflow: auto; font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
+            .control-row { display: grid; grid-template-columns: 118px 1fr; gap: 10px; align-items: center; margin: 9px 0; }
+            .control-row.compact { grid-template-columns: 118px auto; }
+            .segmented { display: inline-flex; border: 1px solid var(--blue-weak); border-radius: 999px; overflow: hidden; background: #fff; }
+            .segmented button { border: 0; border-radius: 0; min-height: 28px; padding: 0 10px; }
+            .log-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+            #packetLog { height: 210px; overflow: auto; border: 2px solid #ff2d2d; background: #fff; padding: 8px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+            .log-entry { padding: 4px 0; border-bottom: 1px solid #eef2f7; }
+            .log-entry.failure { color: var(--red); }
+            .log-entry.success { color: #0f8a3b; }
+            .log-entry.output { color: var(--blue); }
+            .log-entry.ui { color: #8a5cf6; }
+            .preview-panel { background: #fff; border: 1px solid var(--line); border-radius: 30px; padding: 18px; display: grid; grid-template-rows: auto 1fr auto; gap: 10px; }
+            .preview-toolbar { display: flex; justify-content: center; }
+            .preview-toolbar select { padding: 0 14px; }
+            .controller-wrap { position: relative; display: grid; place-items: center; min-height: 470px; }
+            svg.controller { width: min(100%, 930px); height: auto; }
+            .shell { fill: #fff; stroke: #333; stroke-width: 2.2; }
+            .part { fill: #fff; stroke: #444; stroke-width: 2; transition: fill .08s, stroke .08s, transform .08s; transform-box: fill-box; transform-origin: center; }
+            .part.active { fill: var(--blue-weak); stroke: var(--blue); transform: scale(.94); }
+            .face-symbol { fill: none; stroke: #777; stroke-width: 3; pointer-events: none; }
+            .stick-dot { fill: rgba(47,128,237,.7); transition: transform .05s; }
+            .trigger-fill { fill: rgba(47,128,237,.25); opacity: 0; transition: opacity .05s; }
+            #touchpad-zone { fill: rgba(255,255,255,.88); stroke: #333; stroke-width: 2; }
+            #touchpad-zone.active { fill: var(--blue-weak); stroke: var(--blue); }
+            .finger { position: absolute; width: 28px; height: 28px; border-radius: 50%; background: rgba(47,128,237,.55); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--blue); transform: translate(-50%, -50%); opacity: 0; pointer-events: none; transition: opacity .12s; }
+            .finger.secondary { background: rgba(255,77,79,.45); box-shadow: 0 0 0 1px var(--red); }
+            .sensor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; max-width: 820px; margin: 0 auto; width: 100%; }
+            .sensor-title { text-align: center; color: var(--blue); font-weight: 800; font-size: 20px; margin-bottom: 8px; }
+            .axis-row { display: grid; grid-template-columns: 82px 1fr 120px; gap: 10px; align-items: center; margin: 7px 0; font-weight: 700; }
+            .axis-row.x { color: var(--blue); }
+            .axis-row.y { color: var(--red); }
+            .axis-row.z { color: var(--orange); }
+            .axis-bar { position: relative; height: 6px; border-radius: 999px; background: currentColor; opacity: .22; }
+            .axis-dot { position: absolute; top: 50%; left: 50%; width: 14px; height: 14px; border-radius: 50%; background: currentColor; transform: translate(-50%, -50%); opacity: 1; }
+            .button-row { display: grid; grid-template-columns: 124px repeat(3, 1fr); gap: 5px; align-items: center; font-size: 12px; }
+            .cell { min-height: 24px; border-radius: 7px; display: grid; place-items: center; background: #f0f5ff; color: var(--blue); }
+            .cell.pass { background: var(--blue); color: #fff; }
+            details summary { color: var(--blue); font-weight: 800; cursor: pointer; }
+            @media (max-width: 980px) {
+              .workspace { grid-template-columns: 1fr; }
+              .sensor-grid { grid-template-columns: 1fr; }
+            }
           </style>
         </head>
         <body>
-          <header><h1>DualSenseKitDemo 硬件测试 MVP</h1></header>
-          <main>
-            <section>
-              <h2>状态</h2>
-              <div id="status" class="grid"></div>
-            </section>
-            <section>
-              <h2>按键测试</h2>
-              <div id="buttons"></div>
-            </section>
-            <section>
-              <h2>灯光测试</h2>
-              <div class="actions">
-                <button data-rgb="255,0,0">红</button>
-                <button data-rgb="0,255,0">绿</button>
-                <button data-rgb="0,0,255">蓝</button>
-                <button data-rgb="255,255,255">白</button>
-                <button data-rgb="0,0,0">关闭 RGB</button>
-                <button id="sequence">运行序列</button>
+          <header><h1>DualSenseKit 硬件调试台</h1></header>
+          <main class="workspace">
+            <aside class="side-panel">
+              <section class="module">
+                <h2>硬件信息</h2>
+                <div id="status" class="status-grid"></div>
+              </section>
+
+              <section class="module">
+                <h2>输出</h2>
+                <div class="control-row compact"><label>麦克风指示灯</label><select id="micLEDMode"><option value="off">关</option><option value="on">开</option><option value="breathe">闪烁</option></select></div>
+                <div class="control-row"><label>灯带颜色</label><input id="lightbarColor" type="color" value="#00ff00"></div>
+                <div class="control-row"><label>灯带亮度</label><input id="lightbarBrightness" type="range" min="0" max="1" step="0.01" value="1"></div>
+                <div class="actions" style="margin-bottom:8px"><button data-rgb="255,0,0">红</button><button data-rgb="0,255,0">绿</button><button data-rgb="0,0,255">蓝</button><button data-rgb="255,255,255">白</button><button data-rgb="0,0,0">关闭</button></div>
+                <div class="control-row compact"><label>玩家指示灯</label><div class="segmented"><button data-mask="0">关</button><button data-mask="4">1</button><button data-mask="10">2</button><button data-mask="21">3</button><button data-mask="27">4</button><button data-mask="31">全部</button></div></div>
+                <div class="control-row compact"><label>玩家灯亮度</label><div class="segmented"><button data-player-brightness="0">亮</button><button data-player-brightness="1">中</button><button data-player-brightness="2">暗</button></div></div>
+                <div class="control-row"><label>震动（重）</label><input id="heavyRumble" type="range" min="0" max="1" step="0.01" value="0"></div>
+                <div class="control-row"><label>震动（轻）</label><input id="lightRumble" type="range" min="0" max="1" step="0.01" value="0"></div>
+                <div class="control-row compact"><label>自适应扳机（左）</label><select id="leftTriggerMode"><option value="off">关</option><option value="feedback">阻力</option><option value="weapon">单点</option><option value="vibration">连击</option><option value="slopeFeedback">渐变</option></select></div>
+                <div class="control-row compact"><label>自适应扳机（右）</label><select id="rightTriggerMode"><option value="off">关</option><option value="feedback">阻力</option><option value="weapon">单点</option><option value="vibration">连击</option><option value="slopeFeedback">渐变</option></select></div>
+                <div class="control-row"><label>L2 起始</label><input id="leftTriggerStart" type="range" min="0" max="0.95" step="0.01" value="0.10"></div>
+                <div class="control-row"><label>L2 力度</label><input id="leftTriggerStrength" type="range" min="0" max="1" step="0.01" value="0"></div>
+                <div class="control-row"><label>R2 起始</label><input id="rightTriggerStart" type="range" min="0" max="0.95" step="0.01" value="0.10"></div>
+                <div class="control-row"><label>R2 力度</label><input id="rightTriggerStrength" type="range" min="0" max="1" step="0.01" value="0"></div>
+                <div class="actions"><button id="stopRumble">停止震动</button><button id="disableTriggers">关闭扳机</button><button id="resetEffects">复位手柄效果</button><button id="sequence">运行灯光序列</button></div>
+              </section>
+
+              <section class="module">
+                <details>
+                  <summary>按键测试</summary>
+                  <div id="buttons" style="margin-top:10px"></div>
+                </details>
+              </section>
+
+              <section class="module">
+                <h2>发包日志</h2>
+                <div class="log-tools">
+                  <button id="pauseLog">暂停</button>
+                  <button id="clearLog">清空</button>
+                  <select id="logFilter"><option value="all">全部</option><option value="output">发包</option><option value="failure">失败</option><option value="input">输入</option><option value="ui">UI 操作</option></select>
+                </div>
+                <div id="packetLog"></div>
+              </section>
+            </aside>
+
+            <section class="preview-panel">
+              <div class="preview-toolbar"><select id="numberToggle"><option>数值显示开启</option><option>数值显示关闭</option></select></div>
+              <div class="controller-wrap" id="controllerWrap">
+                <svg class="controller" viewBox="0 0 1000 620" role="img" aria-label="DualSense controller preview">
+                  <path class="shell" d="M178 153 C210 121 312 121 355 142 C396 128 604 128 645 142 C688 121 790 121 822 153 C886 187 912 505 852 547 C813 569 762 442 742 392 C695 380 305 380 258 392 C238 442 187 569 148 547 C88 505 114 187 178 153 Z"/>
+                  <path class="part trigger" data-button="leftTrigger" d="M200 72 C222 20 286 24 298 96 L200 96 Z"/>
+                  <path class="part trigger" data-button="rightTrigger" d="M702 96 C714 24 778 20 800 72 L800 96 Z"/>
+                  <rect class="trigger-fill" id="leftTriggerFill" x="200" y="72" width="98" height="24" rx="4"/>
+                  <rect class="trigger-fill" id="rightTriggerFill" x="702" y="72" width="98" height="24" rx="4"/>
+                  <path id="touchpad-zone" data-button="touchpadButton" d="M355 142 C410 132 590 132 645 142 L618 274 C606 301 394 301 382 274 Z"/>
+                  <g class="dpad">
+                    <path class="part" data-button="dpadUp" d="M210 215 L238 185 L266 215 L238 246 Z"/>
+                    <path class="part" data-button="dpadLeft" d="M178 248 L209 220 L238 248 L209 276 Z"/>
+                    <path class="part" data-button="dpadRight" d="M266 248 L295 220 L326 248 L295 276 Z"/>
+                    <path class="part" data-button="dpadDown" d="M210 282 L238 251 L266 282 L238 312 Z"/>
+                  </g>
+                  <g class="face">
+                    <circle class="part" data-button="buttonY" cx="782" cy="205" r="31"/><path class="face-symbol" d="M782 188 L800 220 L764 220 Z"/>
+                    <circle class="part" data-button="buttonX" cx="718" cy="252" r="31"/><rect class="face-symbol" x="703" y="237" width="30" height="30"/>
+                    <circle class="part" data-button="buttonB" cx="846" cy="252" r="31"/><circle class="face-symbol" cx="846" cy="252" r="17"/>
+                    <circle class="part" data-button="buttonA" cx="782" cy="300" r="31"/><path class="face-symbol" d="M765 284 L799 318 M799 284 L765 318"/>
+                  </g>
+                  <circle class="part" data-button="leftThumbstickButton" cx="335" cy="362" r="55"/>
+                  <circle class="part" data-button="rightThumbstickButton" cx="665" cy="362" r="55"/>
+                  <circle class="stick-dot" id="leftStickDot" cx="335" cy="362" r="12"/>
+                  <circle class="stick-dot" id="rightStickDot" cx="665" cy="362" r="12"/>
+                  <rect class="part" data-button="buttonMenu" x="315" y="165" width="28" height="58" rx="14" transform="rotate(-12 329 194)"/>
+                  <rect class="part" data-button="buttonOptions" x="657" y="165" width="28" height="58" rx="14" transform="rotate(12 671 194)"/>
+                  <path class="part" data-button="buttonHome" d="M500 331 C523 343 523 372 500 384 C477 372 477 343 500 331 Z"/>
+                  <rect class="part" data-button="buttonMicrophoneMute" x="476" y="392" width="48" height="14" rx="7"/>
+                  <path class="part" data-button="leftShoulder" d="M185 118 C226 102 278 103 320 123 L310 145 C263 132 223 132 176 148 Z"/>
+                  <path class="part" data-button="rightShoulder" d="M680 123 C722 103 774 102 815 118 L824 148 C777 132 737 132 690 145 Z"/>
+                </svg>
+                <div id="finger0" class="finger"></div>
+                <div id="finger1" class="finger secondary"></div>
               </div>
-              <div class="actions" style="margin-top:10px">
-                <button data-mask="4">玩家 1</button>
-                <button data-mask="10">玩家 2</button>
-                <button data-mask="21">玩家 3</button>
-                <button data-mask="27">玩家 4</button>
-                <button data-mask="31">全亮</button>
-                <button data-mask="0">全灭</button>
+
+              <div class="sensor-grid">
+                <div>
+                  <div class="sensor-title">陀螺仪 raw</div>
+                  <div class="axis-row x"><span>俯仰角 X</span><div class="axis-bar"><span id="gyroXDot" class="axis-dot"></span></div><span id="gyroXValue">0</span></div>
+                  <div class="axis-row y"><span>偏航角 Y</span><div class="axis-bar"><span id="gyroYDot" class="axis-dot"></span></div><span id="gyroYValue">0</span></div>
+                  <div class="axis-row z"><span>滚转角 Z</span><div class="axis-bar"><span id="gyroZDot" class="axis-dot"></span></div><span id="gyroZValue">0</span></div>
+                </div>
+                <div>
+                  <div class="sensor-title">加速度计 raw</div>
+                  <div class="axis-row x"><span>X</span><div class="axis-bar"><span id="accelXDot" class="axis-dot"></span></div><span id="accelXValue">0</span></div>
+                  <div class="axis-row y"><span>Y</span><div class="axis-bar"><span id="accelYDot" class="axis-dot"></span></div><span id="accelYValue">0</span></div>
+                  <div class="axis-row z"><span>Z</span><div class="axis-bar"><span id="accelZDot" class="axis-dot"></span></div><span id="accelZValue">0</span></div>
+                </div>
               </div>
-              <div class="control-grid" style="margin-top:10px">
-                <label>状态灯亮度 <span id="playerBrightnessValue">硬件未确认</span><input id="playerBrightness" type="range" min="0" max="2" step="1" value="0" disabled></label>
-                <label>警灯亮度 <span id="lightbarBrightnessValue">1.00</span><input id="lightbarBrightness" type="range" min="0" max="1" step="0.01" value="1"></label>
-                <label>静音灯
-                  <select id="micLEDMode">
-                    <option value="off">关闭</option>
-                    <option value="on">常亮</option>
-                    <option value="breathe">呼吸/闪烁</option>
-                  </select>
-                </label>
-                <label>警灯颜色 <input id="lightbarColor" type="color" value="#00ff00"></label>
-              </div>
-              <div class="checks" style="margin-top:10px">
-                <strong>状态灯自由组合</strong>
-                <label><input type="checkbox" class="playerCheck" value="1">灯 1</label>
-                <label><input type="checkbox" class="playerCheck" value="2">灯 2</label>
-                <label><input type="checkbox" class="playerCheck" value="4">灯 3</label>
-              </div>
-            </section>
-            <section>
-              <h2>马达与扳机</h2>
-              <div class="control-grid">
-                <label>重马达 <span id="heavyRumbleValue">0</span><input id="heavyRumble" type="range" min="0" max="1" step="0.01" value="0"></label>
-                <label>轻马达 <span id="lightRumbleValue">0</span><input id="lightRumble" type="range" min="0" max="1" step="0.01" value="0"></label>
-                <label>L2 模式
-                  <select id="leftTriggerMode">
-                    <option value="off">关闭</option>
-                    <option value="feedback">阻力</option>
-                    <option value="weapon">单点</option>
-                    <option value="vibration">连击</option>
-                    <option value="slopeFeedback">渐变阻力</option>
-                  </select>
-                </label>
-                <label>R2 模式
-                  <select id="rightTriggerMode">
-                    <option value="off">关闭</option>
-                    <option value="feedback">阻力</option>
-                    <option value="weapon">单点</option>
-                    <option value="vibration">连击</option>
-                    <option value="slopeFeedback">渐变阻力</option>
-                  </select>
-                </label>
-                <label>L2 起始 <span id="leftTriggerStartValue">0.10</span><input id="leftTriggerStart" type="range" min="0" max="0.95" step="0.01" value="0.10"></label>
-                <label>L2 终点 <span id="leftTriggerEndValue">0.80</span><input id="leftTriggerEnd" type="range" min="0" max="1" step="0.01" value="0.80"></label>
-                <label>L2 力度 <span id="leftTriggerStrengthValue">0</span><input id="leftTriggerStrength" type="range" min="0" max="1" step="0.01" value="0"></label>
-                <label>L2 频率 <span id="leftTriggerFrequencyValue">10</span><input id="leftTriggerFrequency" type="range" min="0" max="30" step="1" value="10"></label>
-                <label>R2 起始 <span id="rightTriggerStartValue">0.10</span><input id="rightTriggerStart" type="range" min="0" max="0.95" step="0.01" value="0.10"></label>
-                <label>R2 终点 <span id="rightTriggerEndValue">0.80</span><input id="rightTriggerEnd" type="range" min="0" max="1" step="0.01" value="0.80"></label>
-                <label>R2 力度 <span id="rightTriggerStrengthValue">0</span><input id="rightTriggerStrength" type="range" min="0" max="1" step="0.01" value="0"></label>
-                <label>R2 频率 <span id="rightTriggerFrequencyValue">10</span><input id="rightTriggerFrequency" type="range" min="0" max="30" step="1" value="10"></label>
-              </div>
-              <div class="actions" style="margin-top:10px">
-                <button id="stopRumble">停止震动</button>
-                <button id="disableTriggers">关闭扳机</button>
-                <button id="resetEffects">复位手柄效果</button>
-              </div>
-            </section>
-            <section>
-              <h2>事件</h2>
-              <pre id="events"></pre>
+              <div id="touchCoords" style="color:var(--blue);font-weight:700;text-align:center">触控板：等待手指</div>
             </section>
           </main>
           <script>
           const TOKEN = "\(token)";
-          const buttons = [
-            "dpadUp","dpadDown","dpadLeft","dpadRight",
-            "buttonA","buttonB","buttonX","buttonY",
-            "leftShoulder","leftTrigger","rightShoulder","rightTrigger",
-            "leftThumbstickButton","rightThumbstickButton",
-            "buttonMenu","buttonOptions","buttonHome","touchpadButton","buttonMicrophoneMute"
-          ];
+          const buttons = ["dpadUp","dpadDown","dpadLeft","dpadRight","buttonA","buttonB","buttonX","buttonY","leftShoulder","leftTrigger","rightShoulder","rightTrigger","leftThumbstickButton","rightThumbstickButton","buttonMenu","buttonOptions","buttonHome","touchpadButton","buttonMicrophoneMute"];
           const kinds = ["singleClick","doubleClick","longPress"];
           const passed = new Map(buttons.map(b => [b, new Set()]));
-          const eventsEl = document.querySelector("#events");
-          function authHeaders(extra = {}) {
-            return Object.assign({"Authorization": "Bearer " + TOKEN}, extra);
+          const logEntries = [];
+          const highRateLogTimes = new Map();
+          let logPaused = false;
+          let logFilter = "all";
+          let currentPlayerMask = 0;
+          let currentPlayerBrightness = 0;
+          let rumbleTimer = null;
+          let triggerTimer = null;
+          const touchState = { primary: null, secondary: null };
+          function authHeaders(extra = {}) { return Object.assign({"Authorization": "Bearer " + TOKEN}, extra); }
+          function nowTime() { return new Date().toLocaleTimeString("zh-CN", {hour12:false}) + "." + String(new Date().getMilliseconds()).padStart(3, "0"); }
+          function classify(event) {
+            if (event.type === "ui.action") return "ui";
+            if (event.type && event.type.startsWith("hid.output")) return event.type.endsWith("failure") ? "failure" : "output";
+            if (event.type && (event.type.startsWith("button.") || event.type.startsWith("hid.") || event.type.startsWith("touchpad."))) return "input";
+            return "other";
+          }
+          function escapeHTML(value) {
+            return String(value).replace(/[&<>"']/g, ch => {
+              switch (ch) {
+                case "&": return "&amp;";
+                case "<": return "&lt;";
+                case ">": return "&gt;";
+                case '"': return "&quot;";
+                case "'": return "&#39;";
+                default: return ch;
+              }
+            });
+          }
+          function shouldLog(event) {
+            if (!["hid.motion", "hid.axis", "hid.touch", "touchpad.primary", "touchpad.secondary"].includes(event.type)) return true;
+            const last = highRateLogTimes.get(event.type) || 0;
+            const now = Date.now();
+            if (now - last < 500) return false;
+            highRateLogTimes.set(event.type, now);
+            return true;
+          }
+          function appendLog(event) {
+            if (!shouldLog(event)) return;
+            if (logPaused && event.type !== "ui.action") return;
+            const entry = {event, cls: classify(event), time: nowTime()};
+            logEntries.push(entry);
+            if (logEntries.length > 500) logEntries.shift();
+            renderLog();
+          }
+          function renderLog() {
+            const root = document.querySelector("#packetLog");
+            root.innerHTML = logEntries.filter(e => logFilter === "all" || e.cls === logFilter).map(e => {
+              const p = e.event.payload || {};
+              const detail = JSON.stringify(p);
+              return '<div class="log-entry ' + e.cls + '">[' + escapeHTML(e.time) + '] ' + escapeHTML(e.event.type) + ' ' + escapeHTML(detail) + '</div>';
+            }).join("");
+            root.scrollTop = root.scrollHeight;
+          }
+          function uiAction(action, endpoint, body) { appendLog({type:"ui.action", payload:{action, endpoint, body: JSON.stringify(body)}}); }
+          function setActive(button, pressed) {
+            document.querySelectorAll('[data-button="' + button + '"]').forEach(el => el.classList.toggle("active", pressed));
           }
           function renderButtons() {
             const root = document.querySelector("#buttons");
             root.innerHTML = '<div class="button-row"><strong>按键</strong><strong>单击</strong><strong>双击</strong><strong>长按</strong></div>' +
               buttons.map(button => '<div class="button-row"><strong>' + button + '</strong>' +
-                kinds.map(kind => '<div class="cell ' + (passed.get(button).has(kind) ? 'pass' : '') + '">' + (passed.get(button).has(kind) ? '通过' : '等待') + '</div>').join('') +
-                '</div>').join('');
+                kinds.map(kind => '<div class="cell ' + (passed.get(button).has(kind) ? 'pass' : '') + '">' + (passed.get(button).has(kind) ? '通过' : '等待') + '</div>').join('') + '</div>').join('');
           }
+          function updateAxisDot(id, raw, max) {
+            const dot = document.querySelector("#" + id);
+            const clamped = Math.max(-1, Math.min(1, Number(raw) / max));
+            dot.style.left = ((clamped + 1) * 50).toFixed(2) + "%";
+          }
+          function moveStick(id, x, y) {
+            const dot = document.querySelector("#" + id);
+            dot.style.transform = "translate(" + (Number(x) * 24).toFixed(1) + "px," + (Number(y) * 24).toFixed(1) + "px)";
+          }
+          function updateTouch(name, x, y, active) {
+            const key = name === "secondary" ? "secondary" : "primary";
+            touchState[key] = {x:Number(x), y:Number(y), active: active === true || active === "true", at: Date.now()};
+            renderTouch();
+          }
+          function renderTouch() {
+            const zone = document.querySelector("#touchpad-zone").getBoundingClientRect();
+            const wrap = document.querySelector("#controllerWrap").getBoundingClientRect();
+            [["primary","finger0"],["secondary","finger1"]].forEach(([key,id]) => {
+              const state = touchState[key];
+              const el = document.querySelector("#" + id);
+              if (!state || !state.active || Date.now() - state.at > 500) { el.style.opacity = 0; return; }
+              el.style.left = (zone.left - wrap.left + state.x * zone.width) + "px";
+              el.style.top = (zone.top - wrap.top + state.y * zone.height) + "px";
+              el.style.opacity = 1;
+            });
+            const p = touchState.primary;
+            const s = touchState.secondary;
+            document.querySelector("#touchCoords").textContent = "触控板：" +
+              ["primary", "secondary"].map(key => {
+                const t = touchState[key];
+                return key + "=" + (t && t.active ? (t.x.toFixed(3) + "," + t.y.toFixed(3)) : "inactive");
+              }).join("  ");
+          }
+          setInterval(renderTouch, 250);
           function addEvent(event) {
+            appendLog(event);
+            if (event.type === "button.value") {
+              const p = event.payload || {};
+              setActive(p.button, p.pressed === "true");
+            }
             if (event.type && event.type.startsWith("button.")) {
               const kind = event.type.slice("button.".length);
               const button = event.payload && event.payload.button;
@@ -526,22 +669,110 @@ final class APIServer: @unchecked Sendable {
                 renderButtons();
               }
             }
-            eventsEl.textContent = JSON.stringify(event, null, 2) + "\\n" + eventsEl.textContent;
+            if (event.type === "hid.axis") {
+              const axis = event.payload.axis;
+              const value = Number(event.payload.value);
+              if (axis === "leftStickX") window.leftX = value;
+              if (axis === "leftStickY") window.leftY = value;
+              if (axis === "rightStickX") window.rightX = value;
+              if (axis === "rightStickY") window.rightY = value;
+              moveStick("leftStickDot", window.leftX || 0, window.leftY || 0);
+              moveStick("rightStickDot", window.rightX || 0, window.rightY || 0);
+              if (axis === "leftTriggerAnalog") document.querySelector("#leftTriggerFill").style.opacity = value;
+              if (axis === "rightTriggerAnalog") document.querySelector("#rightTriggerFill").style.opacity = value;
+            }
+            if (event.type === "hid.touch" || event.type === "touchpad.primary" || event.type === "touchpad.secondary") {
+              const point = event.payload.point || (event.type.endsWith("secondary") ? "secondary" : "primary");
+              updateTouch(point, event.payload.x, event.payload.y, event.payload.active ?? "true");
+            }
+            if (event.type === "hid.motion") {
+              ["gyroX","gyroY","gyroZ","accelX","accelY","accelZ"].forEach(k => {
+                const value = Number(event.payload[k] || 0);
+                document.querySelector("#" + k + "Value").textContent = String(value);
+                updateAxisDot(k + "Dot", value, 32768);
+              });
+            }
           }
           async function refreshStatus() {
             const [status, controller] = await Promise.all([
               fetch("/v1/status").then(r => r.json()),
               fetch("/v1/controller", {headers: authHeaders()}).then(r => r.json()).catch(() => null)
             ]);
-            document.querySelector("#status").innerHTML = [
-              ["手柄", status.connectedController || "未连接", !!status.connectedController],
-              ["辅助功能", String(status.accessibilityTrusted), status.accessibilityTrusted],
-              ["HID", status.hidStatus, status.hidConnected],
-              ["HID 写入", String(status.hidWritable), status.hidWritable],
-              ["GameController Light", controller && String(controller.supportsLight), controller && controller.supportsLight],
-              ["DualSense Profile", controller && String(controller.isDualSenseProfile), controller && controller.isDualSenseProfile]
-            ].map(([k,v,ok]) => '<span class="pill"><strong>' + k + '</strong><span class="' + (ok ? 'ok' : 'bad') + '">' + v + '</span></span>').join('');
+            const rows = [
+              ["报文序号", "-"],
+              ["手柄状态", status.connectedController || "未连接"],
+              ["辅助功能", String(status.accessibilityTrusted)],
+              ["HID 写入", String(status.hidWritable)],
+              ["GameController Light", controller && String(controller.supportsLight)],
+              ["DualSense Profile", controller && String(controller.isDualSenseProfile)]
+            ];
+            document.querySelector("#status").innerHTML = rows.map(([k,v]) => '<span>' + k + '</span><span>' + v + '</span>').join("");
           }
+          async function requestJSON(endpoint, body, action) {
+            uiAction(action, endpoint, body);
+            await fetch(endpoint, {method:"PUT", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify(body)});
+            refreshStatus();
+          }
+          async function sendRumble(heavy, light, durationMs = 0) { await requestJSON("/v1/haptics/rumble", {heavy, light, durationMs}, "rumble"); }
+          function triggerPayload(side) {
+            return {mode: document.querySelector("#" + side + "TriggerMode").value, startPosition: Number(document.querySelector("#" + side + "TriggerStart").value), strength: Number(document.querySelector("#" + side + "TriggerStrength").value)};
+          }
+          async function sendTriggers() { await requestJSON("/v1/triggers", {left: triggerPayload("left"), right: triggerPayload("right")}, "triggers"); }
+          async function sendPlayerMask(mask) {
+            currentPlayerMask = mask;
+            await requestJSON("/v1/light/player-leds", {mask, brightness: currentPlayerBrightness}, "playerLEDs");
+          }
+          async function sendMicLED() { await requestJSON("/v1/light/mic-mute", {mode: document.querySelector("#micLEDMode").value}, "micMuteLED"); }
+          async function sendLightbar() {
+            const color = document.querySelector("#lightbarColor").value;
+            const body = {r: parseInt(color.slice(1,3), 16), g: parseInt(color.slice(3,5), 16), b: parseInt(color.slice(5,7), 16), brightness: Number(document.querySelector("#lightbarBrightness").value)};
+            await requestJSON("/v1/light/lightbar", body, "lightbar");
+          }
+          ["heavyRumble","lightRumble"].forEach(id => document.querySelector("#" + id).addEventListener("input", () => {
+            clearTimeout(rumbleTimer);
+            rumbleTimer = setTimeout(() => sendRumble(Number(document.querySelector("#heavyRumble").value), Number(document.querySelector("#lightRumble").value), 1000), 60);
+          }));
+          ["leftTriggerMode","rightTriggerMode"].forEach(id => document.querySelector("#" + id).addEventListener("change", sendTriggers));
+          ["leftTriggerStart","leftTriggerStrength","rightTriggerStart","rightTriggerStrength"].forEach(id => document.querySelector("#" + id).addEventListener("input", () => {
+            clearTimeout(triggerTimer);
+            triggerTimer = setTimeout(sendTriggers, 80);
+          }));
+          document.querySelector("#lightbarBrightness").addEventListener("input", sendLightbar);
+          document.querySelector("#lightbarColor").addEventListener("input", sendLightbar);
+          document.querySelector("#micLEDMode").addEventListener("change", sendMicLED);
+          document.querySelector("#pauseLog").addEventListener("click", () => { logPaused = !logPaused; document.querySelector("#pauseLog").textContent = logPaused ? "继续" : "暂停"; });
+          document.querySelector("#clearLog").addEventListener("click", () => { logEntries.length = 0; renderLog(); });
+          document.querySelector("#logFilter").addEventListener("change", event => { logFilter = event.target.value; renderLog(); });
+          document.addEventListener("click", async event => {
+            if (event.target.dataset.rgb) {
+              const [r,g,b] = event.target.dataset.rgb.split(",").map(Number);
+              document.querySelector("#lightbarColor").value = "#" + [r,g,b].map(v => v.toString(16).padStart(2, "0")).join("");
+              await sendLightbar();
+            }
+            if (event.target.dataset.mask !== undefined) await sendPlayerMask(Number(event.target.dataset.mask));
+            if (event.target.dataset.playerBrightness !== undefined) {
+              currentPlayerBrightness = Number(event.target.dataset.playerBrightness);
+              await sendPlayerMask(currentPlayerMask);
+            }
+            if (event.target.id === "sequence") {
+              uiAction("light-sequence", "/v1/test/light-sequence", {});
+              await fetch("/v1/test/light-sequence", {method:"POST", headers: authHeaders()});
+            }
+            if (event.target.id === "stopRumble") {
+              document.querySelector("#heavyRumble").value = "0";
+              document.querySelector("#lightRumble").value = "0";
+              await sendRumble(0, 0, 0);
+            }
+            if (event.target.id === "disableTriggers") {
+              document.querySelector("#leftTriggerMode").value = "off";
+              document.querySelector("#rightTriggerMode").value = "off";
+              await requestJSON("/v1/triggers", {left:{mode:"off"}, right:{mode:"off"}}, "disableTriggers");
+            }
+            if (event.target.id === "resetEffects") {
+              uiAction("reset-effects", "/v1/test/reset-effects", {});
+              await fetch("/v1/test/reset-effects", {method:"POST", headers: authHeaders()});
+            }
+          });
           async function loadRecent() {
             const recent = await fetch("/v1/events/recent", {headers: authHeaders()}).then(r => r.json()).catch(() => []);
             recent.forEach(addEvent);
@@ -551,144 +782,6 @@ final class APIServer: @unchecked Sendable {
             ws.onmessage = message => addEvent(JSON.parse(message.data));
             ws.onclose = () => setTimeout(connectEvents, 1000);
           }
-          var rumbleTimer = null;
-          var triggerTimer = null;
-          var currentPlayerMask = 0;
-          function rangeNumber(id) { return Number(document.querySelector("#" + id).value); }
-          function updateValue(id) {
-            const input = document.querySelector("#" + id);
-            const output = document.querySelector("#" + id + "Value");
-            output.textContent = Number(input.value).toFixed(2);
-          }
-          function bindValue(id) {
-            const input = document.querySelector("#" + id);
-            input.addEventListener("input", () => updateValue(id));
-            updateValue(id);
-          }
-          async function sendRumble(heavy, light, durationMs = 0) {
-            await fetch("/v1/haptics/rumble", {
-              method:"PUT",
-              headers: authHeaders({"Content-Type":"application/json"}),
-              body: JSON.stringify({heavy, light, durationMs})
-            });
-            refreshStatus();
-          }
-          function triggerPayload(side) {
-            const mode = document.querySelector("#" + side + "TriggerMode").value;
-            return {
-              mode,
-              startPosition: rangeNumber(side + "TriggerStart"),
-              endPosition: rangeNumber(side + "TriggerEnd"),
-              strength: rangeNumber(side + "TriggerStrength"),
-              endStrength: rangeNumber(side + "TriggerStrength"),
-              amplitude: rangeNumber(side + "TriggerStrength"),
-              frequency: rangeNumber(side + "TriggerFrequency")
-            };
-          }
-          async function sendTriggers() {
-            await fetch("/v1/triggers", {
-              method:"PUT",
-              headers: authHeaders({"Content-Type":"application/json"}),
-              body: JSON.stringify({
-                left: triggerPayload("left"),
-                right: triggerPayload("right")
-              })
-            });
-          }
-          async function sendPlayerMask(mask) {
-            currentPlayerMask = mask;
-            document.querySelectorAll(".playerCheck").forEach(el => {
-              el.checked = (mask & Number(el.value)) !== 0;
-            });
-            await fetch("/v1/light/player-leds", {
-              method:"PUT",
-              headers: authHeaders({"Content-Type":"application/json"}),
-              body: JSON.stringify({mask})
-            });
-          }
-          async function sendPlayerChecks() {
-            const mask = [...document.querySelectorAll(".playerCheck:checked")].reduce((sum, el) => sum | Number(el.value), 0);
-            await sendPlayerMask(mask);
-          }
-          async function sendMicLED() {
-            await fetch("/v1/light/mic-mute", {
-              method:"PUT",
-              headers: authHeaders({"Content-Type":"application/json"}),
-              body: JSON.stringify({mode: document.querySelector("#micLEDMode").value})
-            });
-          }
-          async function sendLightbar() {
-            const color = document.querySelector("#lightbarColor").value;
-            const r = parseInt(color.slice(1,3), 16);
-            const g = parseInt(color.slice(3,5), 16);
-            const b = parseInt(color.slice(5,7), 16);
-            const brightness = rangeNumber("lightbarBrightness");
-            await fetch("/v1/light/lightbar", {
-              method:"PUT",
-              headers: authHeaders({"Content-Type":"application/json"}),
-              body: JSON.stringify({r, g, b, brightness})
-            });
-          }
-          ["heavyRumble","lightRumble","lightbarBrightness","leftTriggerStart","leftTriggerEnd","leftTriggerStrength","leftTriggerFrequency","rightTriggerStart","rightTriggerEnd","rightTriggerStrength","rightTriggerFrequency"].forEach(bindValue);
-          ["heavyRumble","lightRumble"].forEach(id => {
-            document.querySelector("#" + id).addEventListener("input", () => {
-              clearTimeout(rumbleTimer);
-              rumbleTimer = setTimeout(() => sendRumble(rangeNumber("heavyRumble"), rangeNumber("lightRumble"), 1000), 80);
-            });
-          });
-          ["leftTriggerMode","rightTriggerMode"].forEach(id => {
-            document.querySelector("#" + id).addEventListener("change", sendTriggers);
-          });
-          ["leftTriggerStart","leftTriggerEnd","leftTriggerStrength","leftTriggerFrequency","rightTriggerStart","rightTriggerEnd","rightTriggerStrength","rightTriggerFrequency"].forEach(id => {
-            document.querySelector("#" + id).addEventListener("input", () => {
-              clearTimeout(triggerTimer);
-              triggerTimer = setTimeout(sendTriggers, 80);
-            });
-          });
-          document.querySelector("#lightbarBrightness").addEventListener("input", sendLightbar);
-          document.querySelector("#lightbarColor").addEventListener("input", sendLightbar);
-          document.querySelector("#micLEDMode").addEventListener("change", sendMicLED);
-          document.querySelectorAll(".playerCheck").forEach(el => el.addEventListener("change", sendPlayerChecks));
-          document.addEventListener("click", async event => {
-            const rgb = event.target.dataset.rgb;
-            const mask = event.target.dataset.mask;
-            const micLED = event.target.dataset.micLed;
-            if (rgb) {
-              const [r,g,b] = rgb.split(",").map(Number);
-              const brightness = rangeNumber("lightbarBrightness");
-              await fetch("/v1/light/lightbar", {method:"PUT", headers: authHeaders({"Content-Type":"application/json"}), body: JSON.stringify({r,g,b,brightness})});
-            }
-            if (mask !== undefined) {
-              await sendPlayerMask(Number(mask));
-            }
-            if (event.target.id === "sequence") {
-              await fetch("/v1/test/light-sequence", {method:"POST", headers: authHeaders()});
-            }
-            if (event.target.id === "stopRumble") {
-              document.querySelector("#heavyRumble").value = "0";
-              document.querySelector("#lightRumble").value = "0";
-              updateValue("heavyRumble");
-              updateValue("lightRumble");
-              await sendRumble(0, 0, 0);
-            }
-            if (event.target.id === "disableTriggers") {
-              document.querySelector("#leftTriggerMode").value = "off";
-              document.querySelector("#rightTriggerMode").value = "off";
-              document.querySelector("#leftTriggerStrength").value = "0";
-              document.querySelector("#rightTriggerStrength").value = "0";
-              updateValue("leftTriggerStrength");
-              updateValue("rightTriggerStrength");
-              await fetch("/v1/triggers", {
-                method:"PUT",
-                headers: authHeaders({"Content-Type":"application/json"}),
-                body: JSON.stringify({left:{mode:"off"}, right:{mode:"off"}})
-              });
-            }
-            if (event.target.id === "resetEffects") {
-              await fetch("/v1/test/reset-effects", {method:"POST", headers: authHeaders()});
-            }
-            refreshStatus();
-          });
           renderButtons();
           refreshStatus();
           loadRecent();

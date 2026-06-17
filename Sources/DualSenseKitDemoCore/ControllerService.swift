@@ -17,6 +17,12 @@ final class ControllerService: @unchecked Sendable {
         },
         touchUpdate: { [weak self] name, x, y, active in
             self?.handleHIDTouch(name: name, x: x, y: y, active: active)
+        },
+        motionUpdate: { [weak self] motion in
+            self?.handleHIDMotion(motion)
+        },
+        outputEvent: { [weak self] event in
+            self?.eventBus.publish(event)
         }
     )
     private var buttonStates: [ControllerButton: ControllerButtonState] = Dictionary(
@@ -269,6 +275,21 @@ final class ControllerService: @unchecked Sendable {
             "y": "\(y)",
             "active": "\(active)"
         ]))
+    }
+
+    private func handleHIDMotion(_ motion: DualSenseMotion) {
+        var payload: [String: String] = [
+            "gyroX": "\(motion.gyroX)",
+            "gyroY": "\(motion.gyroY)",
+            "gyroZ": "\(motion.gyroZ)",
+            "accelX": "\(motion.accelX)",
+            "accelY": "\(motion.accelY)",
+            "accelZ": "\(motion.accelZ)"
+        ]
+        if let timestamp = motion.timestamp {
+            payload["timestamp"] = "\(timestamp)"
+        }
+        eventBus.publish(BridgeEvent(type: "hid.motion", payload: payload))
     }
 
     private func applyTrigger(_ request: TriggerSideRequest, to trigger: GCDualSenseAdaptiveTrigger) {

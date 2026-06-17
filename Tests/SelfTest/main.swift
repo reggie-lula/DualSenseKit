@@ -1,4 +1,5 @@
 import Foundation
+import DualSenseKit
 
 private func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
     if !condition() {
@@ -133,7 +134,31 @@ struct SelfTest {
         fullInput[9] = 0xf0
         fullInput[10] = 0xf0
         fullInput[11] = 0x07
+        fullInput[17] = 0x34
+        fullInput[18] = 0x12
+        fullInput[19] = 0x00
+        fullInput[20] = 0x80
+        fullInput[21] = 0xff
+        fullInput[22] = 0x7f
+        fullInput[23] = 0xfe
+        fullInput[24] = 0xff
+        fullInput[25] = 0x02
+        fullInput[26] = 0x00
+        fullInput[27] = 0x00
+        fullInput[28] = 0xff
+        fullInput[29] = 0x78
+        fullInput[30] = 0x56
+        fullInput[31] = 0x34
+        fullInput[32] = 0x12
         expect(DualSenseHIDService.parseSpecialButtons(report: fullInput) == 0x07, "full input special bits should parse")
+        let parsedInput = DualSenseProtocol.parseInputReport(fullInput)
+        expect(parsedInput?.motion?.gyroX == 0x1234, "gyro x should parse as little-endian Int16")
+        expect(parsedInput?.motion?.gyroY == Int16.min, "gyro y should parse signed Int16")
+        expect(parsedInput?.motion?.gyroZ == Int16.max, "gyro z should parse signed Int16")
+        expect(parsedInput?.motion?.accelX == -2, "accel x should parse signed Int16")
+        expect(parsedInput?.motion?.accelY == 2, "accel y should parse signed Int16")
+        expect(parsedInput?.motion?.accelZ == -256, "accel z should parse signed Int16")
+        expect(parsedInput?.motion?.timestamp == 0x12345678, "motion timestamp should parse little-endian UInt32")
 
         let outputReport = DualSenseHIDService.bluetoothOutputReport(playerLEDMask: 0x1f)
         expect(outputReport.count == 78, "player LED output report should use bluetooth report size")

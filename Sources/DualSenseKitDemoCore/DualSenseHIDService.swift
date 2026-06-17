@@ -6,6 +6,8 @@ final class DualSenseHIDService: @unchecked Sendable {
     typealias ButtonUpdate = (ControllerButton, Bool, Float) -> Void
     typealias AxisUpdate = (String, Float) -> Void
     typealias TouchUpdate = (String, Float, Float, Bool) -> Void
+    typealias MotionUpdate = (DualSenseMotion) -> Void
+    typealias OutputEvent = (BridgeEvent) -> Void
 
     private let queue = DispatchQueue(label: "DualSenseKitDemo.DualSenseHIDService")
     private var manager: IOHIDManager?
@@ -15,6 +17,8 @@ final class DualSenseHIDService: @unchecked Sendable {
     private let buttonUpdate: ButtonUpdate
     private let axisUpdate: AxisUpdate
     private let touchUpdate: TouchUpdate
+    private let motionUpdate: MotionUpdate
+    private let outputEvent: OutputEvent?
     private var previousSpecialButtons: UInt8 = 0
     private var previousButtons: [ControllerButton: Bool] = [:]
     private var previousHat: UInt8 = 8
@@ -31,11 +35,15 @@ final class DualSenseHIDService: @unchecked Sendable {
     init(
         buttonUpdate: @escaping ButtonUpdate,
         axisUpdate: @escaping AxisUpdate,
-        touchUpdate: @escaping TouchUpdate
+        touchUpdate: @escaping TouchUpdate,
+        motionUpdate: @escaping MotionUpdate,
+        outputEvent: OutputEvent? = nil
     ) {
         self.buttonUpdate = buttonUpdate
         self.axisUpdate = axisUpdate
         self.touchUpdate = touchUpdate
+        self.motionUpdate = motionUpdate
+        self.outputEvent = outputEvent
     }
 
     deinit {
@@ -293,6 +301,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         }
         guard let parsed = Self.parseInputReport(data) else { return }
         emitAxes(parsed)
+        emitMotion(parsed)
         emitButtons(parsed)
         emitTouch(parsed)
     }
@@ -304,6 +313,11 @@ final class DualSenseHIDService: @unchecked Sendable {
             previousAxes[name] = value
             axisUpdate(name, value)
         }
+    }
+
+    private func emitMotion(_ report: DualSenseInputReport) {
+        guard let motion = report.motion else { return }
+        motionUpdate(motion)
     }
 
     private func emitButtons(_ report: DualSenseInputReport) {
@@ -370,7 +384,18 @@ final class DualSenseHIDService: @unchecked Sendable {
         case .adaptiveTrigger(let side, let mode, let params):
             DualSenseProtocol.apply(.adaptiveTrigger(side: side, mode: mode, params: params), to: &reportState)
         }
-        let report = DualSenseProtocol.bluetoothOutputReport(state: reportState, sequence: nextOutputSequence())
+        let sequence = nextOutputSequence()
+        let report = DualSenseProtocol.bluetoothOutputReport(state: reportState, sequence: sequence)
+        outputEvent?(BridgeEvent(type: "hid.output.request", payload: [
+            "intent": effect.intentName,
+            "sequence": "\(sequence)",
+            "reportID": String(format: "%02x", report.first ?? 0),
+            "reportLength": "\(report.count)",
+            "reportBytesHexPrefix": report.hexPrefix(count: 24),
+            "validFlag0": String(format: "%02x", reportState.validFlag0),
+            "validFlag1": String(format: "%02x", reportState.validFlag1),
+            "validFlag2": String(format: "%02x", reportState.validFlag2)
+        ]))
         let payloadWithoutReportID = Data(report.dropFirst())
         let attempts: [(IOHIDReportType, CFIndex, Data, String)] = [
             (kIOHIDReportTypeOutput, CFIndex(report[0]), report, "output_full"),
@@ -392,12 +417,30 @@ final class DualSenseHIDService: @unchecked Sendable {
             }
             if result == kIOReturnSuccess {
                 statusText = "report_sent_via_\(name)"
+                outputEvent?(BridgeEvent(type: "hid.output.success", payload: [
+                    "intent": effect.intentName,
+                    "sequence": "\(sequence)",
+                    "attempt": name,
+                    "reportID": "\(reportID)",
+                    "length": "\(data.count)",
+                    "result": String(format: "%08x", result),
+                    "ok": "true",
+                    "status": statusText
+                ]))
                 return result
             }
             failures.append("\(name)=\(String(format: "%08x", result))")
             lastResult = result
         }
         statusText = "set_report_failed_\(failures.joined(separator: ","))"
+        outputEvent?(BridgeEvent(type: "hid.output.failure", payload: [
+            "intent": effect.intentName,
+            "sequence": "\(sequence)",
+            "failures": failures.joined(separator: ","),
+            "lastResult": String(format: "%08x", lastResult),
+            "ok": "false",
+            "status": statusText
+        ]))
         return lastResult
     }
 
@@ -474,6 +517,22 @@ private enum HIDOutputEffect {
     case micMuteLED(control: UInt8)
     case lightbar(red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?)
     case adaptiveTrigger(side: DualSenseTriggerSide, mode: UInt8, params: [UInt8])
+
+    var intentName: String {
+        switch self {
+        case .playerLEDs: return "playerLEDs"
+        case .rumble: return "rumble"
+        case .micMuteLED: return "micMuteLED"
+        case .lightbar: return "lightbar"
+        case .adaptiveTrigger: return "adaptiveTrigger"
+        }
+    }
+}
+
+private extension Data {
+    func hexPrefix(count: Int) -> String {
+        prefix(count).map { String(format: "%02x", $0) }.joined(separator: " ")
+    }
 }
 
 private func deviceMatched(context: UnsafeMutableRawPointer?, result: IOReturn, sender: UnsafeMutableRawPointer?, device: IOHIDDevice?) {
