@@ -52,7 +52,6 @@ final class DualSenseHIDService: @unchecked Sendable {
             ]
             IOHIDManagerSetDeviceMatchingMultiple(manager, matches as CFArray)
             IOHIDManagerRegisterDeviceMatchingCallback(manager, deviceMatched, Unmanaged.passUnretained(self).toOpaque())
-            IOHIDManagerRegisterDeviceRemovalCallback(manager, deviceRemoved, Unmanaged.passUnretained(self).toOpaque())
             IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
             let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
             self.manager = manager
@@ -69,24 +68,28 @@ final class DualSenseHIDService: @unchecked Sendable {
 
     func stop() {
         queue.sync {
-            closeCurrentDevice()
+            if let device {
+                IOHIDDeviceUnscheduleFromRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+                IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
+            }
             if let manager {
                 IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
                 IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
             }
+            inputBuffer?.deallocate()
+            inputBuffer = nil
+            device = nil
+            manager = nil
+            isOpen = false
             rumbleStopWorkItem?.cancel()
             rumbleStopWorkItem = nil
-            manager = nil
             statusText = "stopped"
         }
     }
 
     func diagnostics() -> HIDDiagnostics {
         queue.sync {
-            if !isOpen {
-                refreshSelectedDeviceIfNeeded()
-            }
-            return HIDDiagnostics(
+            HIDDiagnostics(
                 connected: device != nil,
                 writable: isOpen,
                 product: stringProperty(kIOHIDProductKey),
@@ -223,28 +226,23 @@ final class DualSenseHIDService: @unchecked Sendable {
 
     fileprivate func attach(_ matchedDevice: IOHIDDevice) {
         queue.sync {
-            if let device, CFEqual(device, matchedDevice), isOpen {
-                return
-            }
-            if device != nil, isOpen {
-                DiagnosticsLog.write(
-                    "hid matched ignored currentTransport=\(stringProperty(kIOHIDTransportKey) ?? "unknown") newTransport=\(stringProperty(kIOHIDTransportKey, device: matchedDevice) ?? "unknown")"
+            guard device == nil else { return }
+            device = matchedDevice
+            let result = IOHIDDeviceOpen(matchedDevice, IOOptionBits(kIOHIDOptionsTypeNone))
+            isOpen = result == kIOReturnSuccess
+            statusText = isOpen ? "open" : "device_open_failed_\(String(format: "%08x", result))"
+            IOHIDDeviceScheduleWithRunLoop(matchedDevice, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+            inputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: inputBufferSize)
+            inputBuffer?.initialize(repeating: 0, count: inputBufferSize)
+            if let inputBuffer {
+                IOHIDDeviceRegisterInputReportCallback(
+                    matchedDevice,
+                    inputBuffer,
+                    inputBufferSize,
+                    inputReportReceived,
+                    Unmanaged.passUnretained(self).toOpaque()
                 )
-                return
             }
-            _ = activateDevice(matchedDevice, reason: "matched")
-        }
-    }
-
-    fileprivate func remove(_ removedDevice: IOHIDDevice) {
-        queue.sync {
-            guard let device, CFEqual(device, removedDevice) else { return }
-            DiagnosticsLog.write(
-                "hid device removed transport=\(stringProperty(kIOHIDTransportKey) ?? "unknown") product=\(stringProperty(kIOHIDProductKey) ?? "unknown")"
-            )
-            closeCurrentDevice()
-            statusText = "device_removed"
-            refreshSelectedDeviceIfNeeded()
         }
     }
 
@@ -419,7 +417,6 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     private func writableDevice() -> IOHIDDevice? {
-        refreshSelectedDeviceIfNeeded()
         guard let device else {
             statusText = "hid_not_connected"
             return nil
@@ -436,89 +433,6 @@ final class DualSenseHIDService: @unchecked Sendable {
         return nil
     }
 
-    private func refreshSelectedDeviceIfNeeded() {
-        guard !isOpen, let manager else { return }
-        let devices = (IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>) ?? []
-        guard !devices.isEmpty else {
-            closeCurrentDevice()
-            statusText = "hid_not_connected"
-            return
-        }
-        let candidates = sortedCandidates(devices)
-        for candidate in candidates where activateDevice(candidate, reason: "refresh") {
-            return
-        }
-        statusText = "hid_not_open"
-    }
-
-    private func sortedCandidates(_ devices: Set<IOHIDDevice>) -> [IOHIDDevice] {
-        devices.sorted { lhs, rhs in
-            if let device {
-                let lhsIsCurrent = CFEqual(lhs, device)
-                let rhsIsCurrent = CFEqual(rhs, device)
-                if lhsIsCurrent != rhsIsCurrent {
-                    return lhsIsCurrent
-                }
-            }
-            let lhsBluetooth = Self.isBluetoothTransport(stringProperty(kIOHIDTransportKey, device: lhs))
-            let rhsBluetooth = Self.isBluetoothTransport(stringProperty(kIOHIDTransportKey, device: rhs))
-            if lhsBluetooth != rhsBluetooth {
-                return lhsBluetooth
-            }
-            return (stringProperty(kIOHIDTransportKey, device: lhs) ?? "") < (stringProperty(kIOHIDTransportKey, device: rhs) ?? "")
-        }
-    }
-
-    @discardableResult
-    private func activateDevice(_ nextDevice: IOHIDDevice, reason: String) -> Bool {
-        let sameDevice = device.map { CFEqual($0, nextDevice) } ?? false
-        if !sameDevice {
-            closeCurrentDevice()
-            device = nextDevice
-        } else if inputBuffer != nil {
-            IOHIDDeviceUnscheduleFromRunLoop(nextDevice, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
-            IOHIDDeviceClose(nextDevice, IOOptionBits(kIOHIDOptionsTypeNone))
-            inputBuffer?.deallocate()
-            inputBuffer = nil
-            isOpen = false
-        }
-
-        let result = IOHIDDeviceOpen(nextDevice, IOOptionBits(kIOHIDOptionsTypeNone))
-        isOpen = result == kIOReturnSuccess
-        if isOpen {
-            IOHIDDeviceScheduleWithRunLoop(nextDevice, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
-            inputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: inputBufferSize)
-            inputBuffer?.initialize(repeating: 0, count: inputBufferSize)
-            if let inputBuffer {
-                IOHIDDeviceRegisterInputReportCallback(
-                    nextDevice,
-                    inputBuffer,
-                    inputBufferSize,
-                    inputReportReceived,
-                    Unmanaged.passUnretained(self).toOpaque()
-                )
-            }
-            statusText = "open"
-        } else {
-            statusText = "device_open_failed_\(String(format: "%08x", result))"
-        }
-        DiagnosticsLog.write(
-            "hid device activate reason=\(reason) transport=\(stringProperty(kIOHIDTransportKey, device: nextDevice) ?? "unknown") product=\(stringProperty(kIOHIDProductKey, device: nextDevice) ?? "unknown") result=\(String(format: "%08x", result))"
-        )
-        return isOpen
-    }
-
-    private func closeCurrentDevice() {
-        if let device {
-            IOHIDDeviceUnscheduleFromRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
-            IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
-        }
-        inputBuffer?.deallocate()
-        inputBuffer = nil
-        device = nil
-        isOpen = false
-    }
-
     private func match(productID: Int) -> [String: Any] {
         [
             kIOHIDVendorIDKey as String: 0x054c,
@@ -529,12 +443,8 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     private func stringProperty(_ key: String) -> String? {
-        guard let device else { return nil }
-        return stringProperty(key, device: device)
-    }
-
-    private func stringProperty(_ key: String, device: IOHIDDevice) -> String? {
-        guard let value = IOHIDDeviceGetProperty(device, key as CFString) else { return nil }
+        guard let device,
+              let value = IOHIDDeviceGetProperty(device, key as CFString) else { return nil }
         return value as? String
     }
 
@@ -603,12 +513,6 @@ private func deviceMatched(context: UnsafeMutableRawPointer?, result: IOReturn, 
     guard result == kIOReturnSuccess, let context, let device else { return }
     let service = Unmanaged<DualSenseHIDService>.fromOpaque(context).takeUnretainedValue()
     service.attach(device)
-}
-
-private func deviceRemoved(context: UnsafeMutableRawPointer?, result: IOReturn, sender: UnsafeMutableRawPointer?, device: IOHIDDevice?) {
-    guard result == kIOReturnSuccess, let context, let device else { return }
-    let service = Unmanaged<DualSenseHIDService>.fromOpaque(context).takeUnretainedValue()
-    service.remove(device)
 }
 
 private func inputReportReceived(
