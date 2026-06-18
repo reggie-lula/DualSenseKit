@@ -58,6 +58,10 @@ struct SelfTest {
             "legacy config should migrate left click to one-finger touchpad tap"
         )
         expect(
+            migratedConfig.mappings[ButtonGesture(button: .touchpadButton, kind: .press)] == [.mouseClick(.left)],
+            "legacy config should receive immediate physical touchpad click mapping"
+        )
+        expect(
             migratedConfig.mappings[ButtonGesture(button: .touchpadButton, kind: .singleClick)] == nil,
             "legacy default physical touchpad click should be removed from left click mapping"
         )
@@ -190,6 +194,10 @@ struct SelfTest {
         expect(
             BridgeConfig.defaultMappings()[ButtonGesture(button: .touchpadButton, kind: .singleClick)] == nil,
             "physical touchpad button should not default to left mouse click"
+        )
+        expect(
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .touchpadButton, kind: .press)] == [.mouseClick(.left)],
+            "physical touchpad button press should default to immediate left mouse click"
         )
         expect(
             BridgeConfig.defaultMappings()[ButtonGesture(button: .buttonA, kind: .singleClick)] == [

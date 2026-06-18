@@ -17,9 +17,13 @@ final class MouseEventPoster: MousePosting {
     func moveBy(dx: Double, dy: Double) {
         guard permissionService.isAccessibilityTrusted() else { return }
         let current = NSEvent.mouseLocation
-        let screenHeight = NSScreen.screens.first?.frame.height ?? 0
-        let nextAppKit = CGPoint(x: current.x + dx, y: current.y + dy)
-        let nextQuartz = CGPoint(x: nextAppKit.x, y: screenHeight - nextAppKit.y)
+        let screenFrame = Self.screenFrame(containing: current) ?? Self.unionScreenFrame()
+        let nextAppKit = CGPoint(
+            x: min(screenFrame.maxX - 1, max(screenFrame.minX, current.x + dx)),
+            y: min(screenFrame.maxY - 1, max(screenFrame.minY, current.y + dy))
+        )
+        let mainMaxY = NSScreen.screens.first?.frame.maxY ?? screenFrame.maxY
+        let nextQuartz = CGPoint(x: nextAppKit.x, y: mainMaxY - nextAppKit.y)
         CGWarpMouseCursorPosition(nextQuartz)
         CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: nextQuartz, mouseButton: .left)?
             .post(tap: .cghidEventTap)
@@ -29,5 +33,13 @@ final class MouseEventPoster: MousePosting {
         guard permissionService.isAccessibilityTrusted() else { return }
         CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)?
             .post(tap: .cghidEventTap)
+    }
+
+    private static func screenFrame(containing point: CGPoint) -> CGRect? {
+        NSScreen.screens.first { $0.frame.contains(point) }?.frame
+    }
+
+    private static func unionScreenFrame() -> CGRect {
+        NSScreen.screens.map(\.frame).reduce(NSScreen.main?.frame ?? .zero) { $0.union($1) }
     }
 }

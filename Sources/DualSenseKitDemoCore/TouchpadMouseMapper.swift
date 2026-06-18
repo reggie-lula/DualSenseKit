@@ -6,6 +6,8 @@ final class TouchpadMouseMapper {
     private var lastSecondary: (x: Float, y: Float)?
     private var lastPrimaryUpdate: Date?
     private var lastSecondaryUpdate: Date?
+    private var smoothedPrimaryDX: Double = 0
+    private var smoothedPrimaryDY: Double = 0
     private var secondaryActive = false
     private let inactivityInterval: TimeInterval
 
@@ -17,6 +19,8 @@ final class TouchpadMouseMapper {
     func resetPrimary() {
         lastPrimary = nil
         lastPrimaryUpdate = nil
+        smoothedPrimaryDX = 0
+        smoothedPrimaryDY = 0
     }
 
     func resetSecondary() {
@@ -50,10 +54,15 @@ final class TouchpadMouseMapper {
         let rawDX = Double(x - lastPrimary.x)
         let rawDY = Double(y - lastPrimary.y)
         guard abs(rawDX) >= config.deadZone || abs(rawDY) >= config.deadZone else { return }
-        let factor = config.accelerationEnabled ? max(1, (abs(rawDX) + abs(rawDY)) * 8) : 1
-        let dx = rawDX * config.sensitivity * factor * (config.invertX ? -1 : 1)
-        let dy = rawDY * config.sensitivity * factor * (config.invertY ? -1 : 1)
-        mousePoster.moveBy(dx: dx, dy: dy)
+        let magnitude = abs(rawDX) + abs(rawDY)
+        let factor = config.accelerationEnabled ? min(2.4, max(0.65, 0.65 + magnitude * 5)) : 1
+        let targetDX = rawDX * config.sensitivity * factor * (config.invertX ? -1 : 1)
+        let targetDY = rawDY * config.sensitivity * factor * (config.invertY ? -1 : 1)
+        let smoothing = 0.45
+        smoothedPrimaryDX = smoothedPrimaryDX * (1 - smoothing) + targetDX * smoothing
+        smoothedPrimaryDY = smoothedPrimaryDY * (1 - smoothing) + targetDY * smoothing
+        guard abs(smoothedPrimaryDX) >= 0.35 || abs(smoothedPrimaryDY) >= 0.35 else { return }
+        mousePoster.moveBy(dx: smoothedPrimaryDX, dy: smoothedPrimaryDY)
     }
 
     func secondaryMoved(x: Float, y: Float, config: TouchpadConfig) {

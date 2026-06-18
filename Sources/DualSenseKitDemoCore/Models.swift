@@ -153,7 +153,7 @@ struct TouchpadConfig: Codable, Equatable, Sendable {
     var scrollSensitivity: Double = 14
     var invertX: Bool = false
     var invertY: Bool = true
-    var deadZone: Double = 0.003
+    var deadZone: Double = 0.006
     var accelerationEnabled: Bool = true
 }
 
@@ -197,6 +197,7 @@ struct BridgeConfig: Codable, Equatable, Sendable {
             ],
             ButtonGesture(button: .leftThumbstickButton, kind: .singleClick): [.mouseClick(.left)],
             ButtonGesture(button: .rightThumbstickButton, kind: .singleClick): [.mouseClick(.right)],
+            ButtonGesture(button: .touchpadButton, kind: .press): [.mouseClick(.left)],
             ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick): [.mouseClick(.left)],
             ButtonGesture(button: .touchpadTwoFingerTap, kind: .singleClick): [.mouseClick(.right)]
         ]

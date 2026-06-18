@@ -393,8 +393,7 @@ final class ControllerService: @unchecked Sendable {
         let dy = Double(y - start.y)
         let distance = max(start.maxDistance, sqrt(dx * dx + dy * dy))
         guard duration <= 0.22, distance <= 0.035 else { return }
-        recognizer.update(button: .touchpadOneFingerTap, pressed: true)
-        recognizer.update(button: .touchpadOneFingerTap, pressed: false)
+        handleGesture(ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick))
     }
 
     private func handleHIDMotion(_ motion: DualSenseMotion) {
