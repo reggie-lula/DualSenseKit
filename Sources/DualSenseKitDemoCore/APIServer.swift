@@ -188,6 +188,20 @@ final class APIServer: @unchecked Sendable {
                 send(status: 400, json: ["error": "invalid_rumble_request"], connection: connection)
             }
 
+        case ("POST", "/v1/effects/police-heartbeat/start"):
+            do {
+                let request = try JSONDecoder().decode(LightbarRequest.self, from: request.body)
+                let ok = controllerService.startPoliceHeartbeatPattern(brightness: request.brightness)
+                send(status: ok ? 200 : 409, json: ["ok": "\(ok)", "mode": "police-heartbeat"], connection: connection)
+            } catch {
+                let ok = controllerService.startPoliceHeartbeatPattern()
+                send(status: ok ? 200 : 409, json: ["ok": "\(ok)", "mode": "police-heartbeat"], connection: connection)
+            }
+
+        case ("POST", "/v1/effects/police-heartbeat/stop"):
+            let ok = controllerService.stopEffectPattern()
+            send(status: ok ? 200 : 409, json: ["ok": "\(ok)", "mode": "police-heartbeat"], connection: connection)
+
         case ("PUT", "/v1/triggers"):
             do {
                 let request = try JSONDecoder().decode(TriggerRequest.self, from: request.body)
@@ -938,6 +952,17 @@ final class APIServer: @unchecked Sendable {
               });
             }
           }
+          function stopLocalPoliceTimers() {
+            if (policeLightbarTimer) {
+              clearInterval(policeLightbarTimer);
+              policeLightbarTimer = null;
+            }
+            if (heartbeatTimer) {
+              clearInterval(heartbeatTimer);
+              heartbeatTimer = null;
+            }
+            heartbeatTimeouts.splice(0).forEach(clearTimeout);
+          }
           function triggerPayload(side) {
             return {mode: document.querySelector("#" + side + "TriggerMode").value, startPosition: Number(document.querySelector("#" + side + "TriggerStart").value), strength: Number(document.querySelector("#" + side + "TriggerStrength").value)};
           }
@@ -958,32 +983,18 @@ final class APIServer: @unchecked Sendable {
             await requestJSON("/v1/light/lightbar", body, action);
           }
           function startPoliceLightbar() {
-            stopPoliceLightbar(false);
-            policeLightbarStep.value = 0;
-            const frames = [
-              [255, 0, 0],
-              [0, 0, 255]
-            ];
-            const tick = () => {
-              const frame = frames[policeLightbarStep.value % frames.length];
-              policeLightbarStep.value += 1;
-              sendLightbarRGB(frame[0], frame[1], frame[2], "policeLightbar").catch(error => {
-                appendLog({type:"ui.action.failure", payload:{action:"policeLightbar", error:String(error)}});
-              });
-            };
-            tick();
-            policeLightbarTimer = setInterval(tick, 280);
-            scheduleHeartbeatRumble();
-            uiAction("policeLightbar.start", "/v1/light/lightbar", {intervalMs: 280, frames: "red-blue"});
+            stopLocalPoliceTimers();
+            const body = {brightness: Number(document.querySelector("#lightbarBrightness").value)};
+            postJSON("/v1/effects/police-heartbeat/start", body, "policeHeartbeat.start").catch(error => {
+              appendLog({type:"ui.action.failure", payload:{action:"policeHeartbeat.start", error:String(error)}});
+            });
           }
           function stopPoliceLightbar(logAction = true) {
-            if (policeLightbarTimer) {
-              clearInterval(policeLightbarTimer);
-              policeLightbarTimer = null;
-            }
-            stopHeartbeatRumble(logAction);
+            stopLocalPoliceTimers();
             if (logAction) {
-              uiAction("policeLightbar.stop", "/v1/light/lightbar", {});
+              postJSON("/v1/effects/police-heartbeat/stop", {}, "policeHeartbeat.stop").catch(error => {
+                appendLog({type:"ui.action.failure", payload:{action:"policeHeartbeat.stop", error:String(error)}});
+              });
             }
           }
           let lastRecordingPath = "";

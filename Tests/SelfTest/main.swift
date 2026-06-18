@@ -384,6 +384,15 @@ struct SelfTest {
         expect(rumbleReport[6] == 64, "rumble report should set left motor byte")
         expect(rumbleReport[46] == 0, "rumble report should not set player LED bytes")
 
+        var combinedState = DualSenseOutputState()
+        DualSenseProtocol.apply(.rumble(leftMotor: 224, rightMotor: 40), to: &combinedState)
+        DualSenseProtocol.apply(.lightbar(red: 255, green: 0, blue: 0, brightness: nil), to: &combinedState)
+        let combinedReport = DualSenseProtocol.bluetoothOutputReport(state: combinedState)
+        expect(combinedReport[3] == 0x03, "combined report should enable rumble flags")
+        expect((combinedReport[4] & 0x04) != 0, "combined report should enable lightbar flag")
+        expect(combinedReport[5] == 40 && combinedReport[6] == 224, "combined report should include heartbeat rumble bytes")
+        expect(combinedReport[47] == 255 && combinedReport[48] == 0 && combinedReport[49] == 0, "combined report should include lightbar RGB bytes")
+
         var audioVolumeState = DualSenseOutputState()
         DualSenseProtocol.apply(.audioVolume(headphone: 166, speaker: 217), to: &audioVolumeState)
         let audioVolumeReport = DualSenseProtocol.bluetoothOutputReport(state: audioVolumeState)

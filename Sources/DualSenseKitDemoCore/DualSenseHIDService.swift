@@ -31,6 +31,8 @@ final class DualSenseHIDService: @unchecked Sendable {
     private var outputSequence: UInt8 = 0
     private var outputState = DualSenseOutputState()
     private var rumbleStopWorkItem: DispatchWorkItem?
+    private var effectPatternTimer: DispatchSourceTimer?
+    private var effectPatternStartedAt: DispatchTime?
     private var toneStopWorkItem: DispatchWorkItem?
     private var lastAudioStatus: DualSenseAudioStatus?
     private var captureStartedAt: Date?
@@ -98,6 +100,9 @@ final class DualSenseHIDService: @unchecked Sendable {
             isOpen = false
             rumbleStopWorkItem?.cancel()
             rumbleStopWorkItem = nil
+            effectPatternTimer?.cancel()
+            effectPatternTimer = nil
+            effectPatternStartedAt = nil
             toneStopWorkItem?.cancel()
             toneStopWorkItem = nil
             captureStopWorkItem?.cancel()
@@ -186,6 +191,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         let safeRight = UInt8(clamping: Int(clamp01(right) * 255))
         let safeDuration = max(0, min(durationMs ?? 0, 5000))
         let ok = queue.sync {
+            cancelEffectPatternLocked()
             rumbleStopWorkItem?.cancel()
             rumbleStopWorkItem = nil
             guard let device, isOpen else {
@@ -209,6 +215,49 @@ final class DualSenseHIDService: @unchecked Sendable {
             )
         }
         return ok
+    }
+
+    @discardableResult
+    func startPoliceHeartbeatPattern(brightness: UInt8? = nil) -> Bool {
+        queue.sync {
+            guard device != nil, isOpen else {
+                statusText = "hid_not_open"
+                return false
+            }
+            cancelEffectPatternLocked()
+            rumbleStopWorkItem?.cancel()
+            rumbleStopWorkItem = nil
+            effectPatternStartedAt = .now()
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now(), repeating: .milliseconds(40), leeway: .milliseconds(4))
+            timer.setEventHandler { [weak self] in
+                self?.sendPoliceHeartbeatFrameLocked(brightness: brightness)
+            }
+            effectPatternTimer = timer
+            timer.resume()
+            statusText = "police_heartbeat_started"
+            sendPoliceHeartbeatFrameLocked(brightness: brightness)
+            return true
+        }
+    }
+
+    @discardableResult
+    func stopEffectPattern() -> Bool {
+        queue.sync {
+            cancelEffectPatternLocked()
+            guard let device, isOpen else {
+                statusText = "hid_not_open"
+                return false
+            }
+            let result = sendReport(.combined(
+                lightbar: nil,
+                rumble: (leftMotor: 0, rightMotor: 0)
+            ), device: device)
+            statusText = result == kIOReturnSuccess
+                ? "effect_pattern_stopped"
+                : "effect_pattern_stop_failed_\(String(format: "%08x", result))"
+            return result == kIOReturnSuccess
+        }
     }
 
     @discardableResult
@@ -327,6 +376,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     @discardableResult
     func setLightbar(red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?) -> Bool {
         queue.sync {
+            cancelEffectPatternLocked()
             guard let device, isOpen else {
                 statusText = "hid_not_open"
                 return false
@@ -337,6 +387,48 @@ final class DualSenseHIDService: @unchecked Sendable {
                 : "lightbar_failed_\(String(format: "%08x", result))"
             return result == kIOReturnSuccess
         }
+    }
+
+    private func cancelEffectPatternLocked() {
+        effectPatternTimer?.cancel()
+        effectPatternTimer = nil
+        effectPatternStartedAt = nil
+    }
+
+    private func sendPoliceHeartbeatFrameLocked(brightness: UInt8?) {
+        guard let device, isOpen else {
+            statusText = "hid_not_open"
+            cancelEffectPatternLocked()
+            return
+        }
+        let elapsedMs: UInt64
+        if let effectPatternStartedAt {
+            elapsedMs = DispatchTime.now().uptimeNanoseconds >= effectPatternStartedAt.uptimeNanoseconds
+                ? (DispatchTime.now().uptimeNanoseconds - effectPatternStartedAt.uptimeNanoseconds) / 1_000_000
+                : 0
+        } else {
+            elapsedMs = 0
+        }
+        let cycle = elapsedMs % 1_250
+        let rumble: (leftMotor: UInt8, rightMotor: UInt8)
+        switch cycle {
+        case 0..<110:
+            rumble = (leftMotor: 224, rightMotor: 40)
+        case 185..<285:
+            rumble = (leftMotor: 112, rightMotor: 20)
+        default:
+            rumble = (leftMotor: 0, rightMotor: 0)
+        }
+        let lightbar: (red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?)
+        if (elapsedMs / 280).isMultiple(of: 2) {
+            lightbar = (red: 255, green: 0, blue: 0, brightness: brightness)
+        } else {
+            lightbar = (red: 0, green: 0, blue: 255, brightness: brightness)
+        }
+        let result = sendReport(.combined(lightbar: lightbar, rumble: rumble), device: device)
+        statusText = result == kIOReturnSuccess
+            ? "police_heartbeat_frame"
+            : "police_heartbeat_failed_\(String(format: "%08x", result))"
     }
 
     @discardableResult
@@ -401,6 +493,16 @@ final class DualSenseHIDService: @unchecked Sendable {
             DualSenseProtocol.apply(.adaptiveTrigger(side: side, mode: mode, params: params), to: &state)
         case .audioVolume(let headphone, let speaker):
             DualSenseProtocol.apply(.audioVolume(headphone: headphone, speaker: speaker), to: &state)
+        case .combined(let lightbar, let rumble):
+            if let lightbar {
+                DualSenseProtocol.apply(
+                    .lightbar(red: lightbar.red, green: lightbar.green, blue: lightbar.blue, brightness: lightbar.brightness),
+                    to: &state
+                )
+            }
+            if let rumble {
+                DualSenseProtocol.apply(.rumble(leftMotor: rumble.leftMotor, rightMotor: rumble.rightMotor), to: &state)
+            }
         }
         return DualSenseProtocol.bluetoothOutputReport(state: state, sequence: sequence)
     }
@@ -536,6 +638,16 @@ final class DualSenseHIDService: @unchecked Sendable {
             DualSenseProtocol.apply(.adaptiveTrigger(side: side, mode: mode, params: params), to: &outputState)
         case .audioVolume(let headphone, let speaker):
             DualSenseProtocol.apply(.audioVolume(headphone: headphone, speaker: speaker), to: &outputState)
+        case .combined(let lightbar, let rumble):
+            if let lightbar {
+                DualSenseProtocol.apply(
+                    .lightbar(red: lightbar.red, green: lightbar.green, blue: lightbar.blue, brightness: lightbar.brightness),
+                    to: &outputState
+                )
+            }
+            if let rumble {
+                DualSenseProtocol.apply(.rumble(leftMotor: rumble.leftMotor, rightMotor: rumble.rightMotor), to: &outputState)
+            }
         }
         var reportState = outputState
         reportState.validFlag0 = 0
@@ -554,6 +666,16 @@ final class DualSenseHIDService: @unchecked Sendable {
             DualSenseProtocol.apply(.adaptiveTrigger(side: side, mode: mode, params: params), to: &reportState)
         case .audioVolume(let headphone, let speaker):
             DualSenseProtocol.apply(.audioVolume(headphone: headphone, speaker: speaker), to: &reportState)
+        case .combined(let lightbar, let rumble):
+            if let lightbar {
+                DualSenseProtocol.apply(
+                    .lightbar(red: lightbar.red, green: lightbar.green, blue: lightbar.blue, brightness: lightbar.brightness),
+                    to: &reportState
+                )
+            }
+            if let rumble {
+                DualSenseProtocol.apply(.rumble(leftMotor: rumble.leftMotor, rightMotor: rumble.rightMotor), to: &reportState)
+            }
         }
         let sequence = nextOutputSequence()
         let report = DualSenseProtocol.bluetoothOutputReport(state: reportState, sequence: sequence)
@@ -813,6 +935,10 @@ private enum HIDOutputEffect {
     case lightbar(red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?)
     case adaptiveTrigger(side: DualSenseTriggerSide, mode: UInt8, params: [UInt8])
     case audioVolume(headphone: UInt8?, speaker: UInt8?)
+    case combined(
+        lightbar: (red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?)?,
+        rumble: (leftMotor: UInt8, rightMotor: UInt8)?
+    )
 
     var intentName: String {
         switch self {
@@ -822,6 +948,7 @@ private enum HIDOutputEffect {
         case .lightbar: return "lightbar"
         case .adaptiveTrigger: return "adaptiveTrigger"
         case .audioVolume: return "audioVolume"
+        case .combined: return "combined"
         }
     }
 }

@@ -104,6 +104,15 @@ final class ControllerService: @unchecked Sendable {
         return hidService.setRumble(left: heavy, right: light, durationMs: request.durationMs)
     }
 
+    func startPoliceHeartbeatPattern(brightness: Float? = nil) -> Bool {
+        let safeBrightness = brightness.map { UInt8(clamping: Int(clamp01($0) * 2)) }
+        return hidService.startPoliceHeartbeatPattern(brightness: safeBrightness)
+    }
+
+    func stopEffectPattern() -> Bool {
+        hidService.stopEffectPattern()
+    }
+
     func setAudioVolume(_ request: AudioVolumeRequest) -> Bool {
         hidService.setAudioVolume(headphone: request.headphone, speaker: request.speaker)
     }
