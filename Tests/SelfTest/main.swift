@@ -30,7 +30,21 @@ struct SelfTest {
         expect(decodedConfig == config, "BridgeConfig should round-trip through JSON")
         var legacyConfig = BridgeConfig()
         legacyConfig.mappings = [
-            ButtonGesture(button: .touchpadButton, kind: .singleClick): [.mouseClick(.left)]
+            ButtonGesture(button: .touchpadButton, kind: .singleClick): [.mouseClick(.left)],
+            ButtonGesture(button: .buttonA, kind: .singleClick): [
+                .keyStroke(KeyStroke(keyCode: 36, modifiers: []))
+            ],
+            ButtonGesture(button: .buttonX, kind: .singleClick): [
+                .keyStroke(KeyStroke(keyCode: 49, modifiers: []))
+            ],
+            ButtonGesture(button: .rightShoulder, kind: .singleClick): [
+                .keyStroke(KeyStroke(keyCode: 48, modifiers: [.command]))
+            ],
+            ButtonGesture(button: .leftShoulder, kind: .singleClick): [
+                .keyStroke(KeyStroke(keyCode: 48, modifiers: [.command, .shift]))
+            ],
+            ButtonGesture(button: .leftThumbstickButton, kind: .singleClick): [.mouseClick(.left)],
+            ButtonGesture(button: .rightThumbstickButton, kind: .singleClick): [.mouseClick(.right)]
         ]
         let legacyURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("dualsensekit-legacy-\(UUID().uuidString)")
@@ -42,16 +56,36 @@ struct SelfTest {
         try JSONEncoder().encode(legacyConfig).write(to: legacyURL)
         let migratedConfig = ConfigStore(configURL: legacyURL).load()
         expect(
-            migratedConfig.mappings[ButtonGesture(button: .rightShoulder, kind: .singleClick)] == [
+            migratedConfig.mappings[ButtonGesture(button: .rightShoulder, kind: .press)] == [
                 .keyStroke(KeyStroke(keyCode: 48, modifiers: [.command]))
             ],
-            "legacy config should receive missing default shoulder mappings"
+            "legacy config should migrate right shoulder to immediate press mapping"
         )
         expect(
-            migratedConfig.mappings[ButtonGesture(button: .buttonA, kind: .singleClick)] == [
+            migratedConfig.mappings[ButtonGesture(button: .leftShoulder, kind: .press)] == [
+                .keyStroke(KeyStroke(keyCode: 48, modifiers: [.command, .shift]))
+            ],
+            "legacy config should migrate left shoulder to immediate press mapping"
+        )
+        expect(
+            migratedConfig.mappings[ButtonGesture(button: .buttonA, kind: .press)] == [
                 .keyStroke(KeyStroke(keyCode: 36, modifiers: []))
             ],
-            "legacy config should receive missing default cross button enter mapping"
+            "legacy config should migrate cross button enter to immediate press mapping"
+        )
+        expect(
+            migratedConfig.mappings[ButtonGesture(button: .buttonX, kind: .press)] == [
+                .keyStroke(KeyStroke(keyCode: 49, modifiers: []))
+            ],
+            "legacy config should migrate square button space to immediate press mapping"
+        )
+        expect(
+            migratedConfig.mappings[ButtonGesture(button: .leftThumbstickButton, kind: .press)] == [.mouseClick(.left)],
+            "legacy config should migrate left thumbstick click to immediate press mapping"
+        )
+        expect(
+            migratedConfig.mappings[ButtonGesture(button: .rightThumbstickButton, kind: .press)] == [.mouseClick(.right)],
+            "legacy config should migrate right thumbstick click to immediate press mapping"
         )
         expect(
             migratedConfig.mappings[ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick)] == [.mouseClick(.left)],
@@ -64,6 +98,15 @@ struct SelfTest {
         expect(
             migratedConfig.mappings[ButtonGesture(button: .touchpadButton, kind: .singleClick)] == nil,
             "legacy default physical touchpad click should be removed from left click mapping"
+        )
+        expect(
+            migratedConfig.mappings[ButtonGesture(button: .buttonA, kind: .singleClick)] == nil
+                && migratedConfig.mappings[ButtonGesture(button: .buttonX, kind: .singleClick)] == nil
+                && migratedConfig.mappings[ButtonGesture(button: .rightShoulder, kind: .singleClick)] == nil
+                && migratedConfig.mappings[ButtonGesture(button: .leftShoulder, kind: .singleClick)] == nil
+                && migratedConfig.mappings[ButtonGesture(button: .leftThumbstickButton, kind: .singleClick)] == nil
+                && migratedConfig.mappings[ButtonGesture(button: .rightThumbstickButton, kind: .singleClick)] == nil,
+            "legacy delayed button mappings should be removed after press migration"
         )
         try? FileManager.default.removeItem(at: legacyURL.deletingLastPathComponent())
 
@@ -200,30 +243,36 @@ struct SelfTest {
             "physical touchpad button press should default to immediate left mouse click"
         )
         expect(
-            BridgeConfig.defaultMappings()[ButtonGesture(button: .buttonA, kind: .singleClick)] == [
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .buttonA, kind: .press)] == [
                 .keyStroke(KeyStroke(keyCode: 36, modifiers: []))
             ],
-            "cross button single click should default to enter"
+            "cross button press should default to enter"
         )
         expect(
-            BridgeConfig.defaultMappings()[ButtonGesture(button: .leftThumbstickButton, kind: .singleClick)] == [.mouseClick(.left)],
-            "left thumbstick button single click should default to left mouse click"
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .buttonX, kind: .press)] == [
+                .keyStroke(KeyStroke(keyCode: 49, modifiers: []))
+            ],
+            "square button press should default to space"
         )
         expect(
-            BridgeConfig.defaultMappings()[ButtonGesture(button: .rightThumbstickButton, kind: .singleClick)] == [.mouseClick(.right)],
-            "right thumbstick button single click should default to right mouse click"
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .leftThumbstickButton, kind: .press)] == [.mouseClick(.left)],
+            "left thumbstick button press should default to immediate left mouse click"
         )
         expect(
-            BridgeConfig.defaultMappings()[ButtonGesture(button: .rightShoulder, kind: .singleClick)] == [
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .rightThumbstickButton, kind: .press)] == [.mouseClick(.right)],
+            "right thumbstick button press should default to immediate right mouse click"
+        )
+        expect(
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .rightShoulder, kind: .press)] == [
                 .keyStroke(KeyStroke(keyCode: 48, modifiers: [.command]))
             ],
-            "right shoulder single click should default to next application"
+            "right shoulder press should default to next application"
         )
         expect(
-            BridgeConfig.defaultMappings()[ButtonGesture(button: .leftShoulder, kind: .singleClick)] == [
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .leftShoulder, kind: .press)] == [
                 .keyStroke(KeyStroke(keyCode: 48, modifiers: [.command, .shift]))
             ],
-            "left shoulder single click should default to previous application"
+            "left shoulder press should default to previous application"
         )
 
         let stickPoster = RecordingMousePoster()

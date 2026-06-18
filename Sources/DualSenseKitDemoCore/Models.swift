@@ -185,18 +185,22 @@ struct BridgeConfig: Codable, Equatable, Sendable {
     static func defaultMappings() -> [ButtonGesture: [Action]] {
         let tabKeyCode: UInt16 = 48
         let enterKeyCode: UInt16 = 36
+        let spaceKeyCode: UInt16 = 49
         let mappings: [ButtonGesture: [Action]] = [
-            ButtonGesture(button: .buttonA, kind: .singleClick): [
+            ButtonGesture(button: .buttonA, kind: .press): [
                 .keyStroke(KeyStroke(keyCode: enterKeyCode, modifiers: []))
             ],
-            ButtonGesture(button: .rightShoulder, kind: .singleClick): [
+            ButtonGesture(button: .buttonX, kind: .press): [
+                .keyStroke(KeyStroke(keyCode: spaceKeyCode, modifiers: []))
+            ],
+            ButtonGesture(button: .rightShoulder, kind: .press): [
                 .keyStroke(KeyStroke(keyCode: tabKeyCode, modifiers: [.command]))
             ],
-            ButtonGesture(button: .leftShoulder, kind: .singleClick): [
+            ButtonGesture(button: .leftShoulder, kind: .press): [
                 .keyStroke(KeyStroke(keyCode: tabKeyCode, modifiers: [.command, .shift]))
             ],
-            ButtonGesture(button: .leftThumbstickButton, kind: .singleClick): [.mouseClick(.left)],
-            ButtonGesture(button: .rightThumbstickButton, kind: .singleClick): [.mouseClick(.right)],
+            ButtonGesture(button: .leftThumbstickButton, kind: .press): [.mouseClick(.left)],
+            ButtonGesture(button: .rightThumbstickButton, kind: .press): [.mouseClick(.right)],
             ButtonGesture(button: .touchpadButton, kind: .press): [.mouseClick(.left)],
             ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick): [.mouseClick(.left)],
             ButtonGesture(button: .touchpadTwoFingerTap, kind: .singleClick): [.mouseClick(.right)]

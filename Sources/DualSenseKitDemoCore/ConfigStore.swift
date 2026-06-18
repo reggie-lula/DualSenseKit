@@ -63,6 +63,44 @@ private extension BridgeConfig {
         if migrated.mappings[physicalTouchpadClick] == [.mouseClick(.left)] {
             migrated.mappings[physicalTouchpadClick] = nil
         }
+        let immediateDefaultMigrations: [(old: ButtonGesture, new: ButtonGesture, actions: [Action])] = [
+            (
+                ButtonGesture(button: .buttonA, kind: .singleClick),
+                ButtonGesture(button: .buttonA, kind: .press),
+                [.keyStroke(KeyStroke(keyCode: 36, modifiers: []))]
+            ),
+            (
+                ButtonGesture(button: .buttonX, kind: .singleClick),
+                ButtonGesture(button: .buttonX, kind: .press),
+                [.keyStroke(KeyStroke(keyCode: 49, modifiers: []))]
+            ),
+            (
+                ButtonGesture(button: .rightShoulder, kind: .singleClick),
+                ButtonGesture(button: .rightShoulder, kind: .press),
+                [.keyStroke(KeyStroke(keyCode: 48, modifiers: [.command]))]
+            ),
+            (
+                ButtonGesture(button: .leftShoulder, kind: .singleClick),
+                ButtonGesture(button: .leftShoulder, kind: .press),
+                [.keyStroke(KeyStroke(keyCode: 48, modifiers: [.command, .shift]))]
+            ),
+            (
+                ButtonGesture(button: .leftThumbstickButton, kind: .singleClick),
+                ButtonGesture(button: .leftThumbstickButton, kind: .press),
+                [.mouseClick(.left)]
+            ),
+            (
+                ButtonGesture(button: .rightThumbstickButton, kind: .singleClick),
+                ButtonGesture(button: .rightThumbstickButton, kind: .press),
+                [.mouseClick(.right)]
+            )
+        ]
+        for migration in immediateDefaultMigrations where migrated.mappings[migration.old] == migration.actions {
+            migrated.mappings[migration.old] = nil
+            if migrated.mappings[migration.new] == nil {
+                migrated.mappings[migration.new] = migration.actions
+            }
+        }
         for (gesture, actions) in BridgeConfig.defaultMappings() where migrated.mappings[gesture] == nil {
             migrated.mappings[gesture] = actions
         }
