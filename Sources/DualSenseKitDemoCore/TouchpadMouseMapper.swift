@@ -6,6 +6,7 @@ final class TouchpadMouseMapper {
     private var lastSecondary: (x: Float, y: Float)?
     private var lastPrimaryUpdate: Date?
     private var lastSecondaryUpdate: Date?
+    private var secondaryActive = false
     private let inactivityInterval: TimeInterval
 
     init(mousePoster: MousePosting = MouseEventPoster(), inactivityInterval: TimeInterval = 0.15) {
@@ -21,10 +22,23 @@ final class TouchpadMouseMapper {
     func resetSecondary() {
         lastSecondary = nil
         lastSecondaryUpdate = nil
+        secondaryActive = false
+        resetPrimary()
+    }
+
+    func secondaryBegan(x: Float, y: Float) {
+        secondaryActive = true
+        lastSecondary = (x, y)
+        lastSecondaryUpdate = Date()
+        resetPrimary()
     }
 
     func primaryMoved(x: Float, y: Float, config: TouchpadConfig) {
         guard config.enabled else { return }
+        guard !secondaryActive else {
+            resetPrimary()
+            return
+        }
         let now = Date()
         defer {
             lastPrimary = (x, y)
@@ -44,6 +58,8 @@ final class TouchpadMouseMapper {
 
     func secondaryMoved(x: Float, y: Float, config: TouchpadConfig) {
         guard config.enabled else { return }
+        secondaryActive = true
+        resetPrimary()
         let now = Date()
         defer {
             lastSecondary = (x, y)
