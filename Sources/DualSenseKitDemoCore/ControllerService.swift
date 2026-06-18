@@ -293,6 +293,22 @@ final class ControllerService: @unchecked Sendable {
     }
 
     private func handleHIDTouch(name: String, x: Float, y: Float, active: Bool) {
+        switch name {
+        case "primary":
+            if active {
+                touchpadMapper.primaryMoved(x: x, y: y, config: configStore.current.touchpad)
+            } else {
+                touchpadMapper.resetPrimary()
+            }
+        case "secondary":
+            if active {
+                touchpadMapper.secondaryMoved(x: x, y: y, config: configStore.current.touchpad)
+            } else {
+                touchpadMapper.resetSecondary()
+            }
+        default:
+            break
+        }
         eventBus.publish(BridgeEvent(type: "hid.touch", payload: [
             "point": name,
             "x": "\(x)",

@@ -121,6 +121,26 @@ struct SelfTest {
         expect(poster.moves.isEmpty, "first touchpad movement should seed state")
         mapper.primaryMoved(x: 0.2, y: 0.0, config: touchpad)
         expect(poster.moves.count == 1, "second touchpad movement should post cursor delta")
+        mapper.resetPrimary()
+        mapper.primaryMoved(x: 0.8, y: 0.8, config: touchpad)
+        expect(poster.moves.count == 1, "primary reset should make the next touch seed state")
+        mapper.primaryMoved(x: 0.9, y: 0.8, config: touchpad)
+        expect(poster.moves.count == 2, "movement after reset seed should post cursor delta")
+
+        let timeoutPoster = RecordingMousePoster()
+        let timeoutMapper = TouchpadMouseMapper(mousePoster: timeoutPoster, inactivityInterval: 0.03)
+        timeoutMapper.primaryMoved(x: 0.1, y: 0.1, config: touchpad)
+        timeoutMapper.primaryMoved(x: 0.2, y: 0.1, config: touchpad)
+        expect(timeoutPoster.moves.count == 1, "movement before inactivity timeout should move cursor")
+        Thread.sleep(forTimeInterval: 0.05)
+        timeoutMapper.primaryMoved(x: 0.8, y: 0.8, config: touchpad)
+        expect(timeoutPoster.moves.count == 1, "movement after inactivity timeout should only reseed state")
+        timeoutMapper.primaryMoved(x: 0.9, y: 0.8, config: touchpad)
+        expect(timeoutPoster.moves.count == 2, "movement after inactivity reseed should move cursor")
+        expect(
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .touchpadButton, kind: .singleClick)] == [.mouseClick(.left)],
+            "touchpad button single click should default to left mouse click"
+        )
 
         var emitted: [ButtonGesture] = []
         let recognizer = ButtonGestureRecognizer(
