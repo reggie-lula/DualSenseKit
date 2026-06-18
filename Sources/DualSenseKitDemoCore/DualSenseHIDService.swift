@@ -33,6 +33,8 @@ final class DualSenseHIDService: @unchecked Sendable {
     private var rumbleStopWorkItem: DispatchWorkItem?
     private var effectPatternTimer: DispatchSourceTimer?
     private var effectPatternStartedAt: DispatchTime?
+    private var heartbeatIntervalMs: Int = 260
+    private var heartbeatDurationMs: Int = 160
     private var toneStopWorkItem: DispatchWorkItem?
     private var lastAudioStatus: DualSenseAudioStatus?
     private var captureStartedAt: Date?
@@ -218,7 +220,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func startPoliceHeartbeatPattern(brightness: UInt8? = nil) -> Bool {
+    func startPoliceHeartbeatPattern(brightness: UInt8? = nil, intervalMs: Int = 260, durationMs: Int = 160) -> Bool {
         queue.sync {
             guard device != nil, isOpen else {
                 statusText = "hid_not_open"
@@ -227,6 +229,8 @@ final class DualSenseHIDService: @unchecked Sendable {
             cancelEffectPatternLocked()
             rumbleStopWorkItem?.cancel()
             rumbleStopWorkItem = nil
+            heartbeatIntervalMs = max(20, intervalMs)
+            heartbeatDurationMs = max(20, durationMs)
             effectPatternStartedAt = .now()
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.schedule(deadline: .now(), repeating: .milliseconds(40), leeway: .milliseconds(4))
@@ -395,6 +399,41 @@ final class DualSenseHIDService: @unchecked Sendable {
         effectPatternStartedAt = nil
     }
 
+    private func heartbeatStrength(at position: UInt64, intervalMs: Int, durationMs: Int) -> (leftMotor: UInt8, rightMotor: UInt8) {
+        let dur = Double(durationMs)
+        // Strong beat: attack 25% → sustain 25% → decay 50%
+        if position < UInt64(durationMs) {
+            let t = Double(position)
+            let attackEnd = dur * 0.25
+            let sustainEnd = dur * 0.50
+            let env: Double
+            if t < attackEnd {
+                env = t / attackEnd                            // attack 0→1
+            } else if t < sustainEnd {
+                env = 1.0                                      // sustain peak
+            } else {
+                env = 1.0 - (t - sustainEnd) / (dur * 0.50)    // decay 1→0
+            }
+            let left = UInt8(env * 224)
+            return (left, UInt8(env * 40))
+        }
+        // Weak beat: attack 25% → decay 75%, no sustain
+        let weakStart = UInt64(intervalMs)
+        if position >= weakStart && position < weakStart + UInt64(durationMs) {
+            let t = Double(position - weakStart)
+            let attackEnd = dur * 0.25
+            let env: Double
+            if t < attackEnd {
+                env = t / attackEnd                            // attack 0→1
+            } else {
+                env = 1.0 - (t - attackEnd) / (dur * 0.75)     // decay 1→0
+            }
+            let left = UInt8(env * 112)
+            return (left, UInt8(env * 20))
+        }
+        return (0, 0)
+    }
+
     private func sendPoliceHeartbeatFrameLocked(brightness: UInt8?) {
         guard let device, isOpen else {
             statusText = "hid_not_open"
@@ -409,18 +448,13 @@ final class DualSenseHIDService: @unchecked Sendable {
         } else {
             elapsedMs = 0
         }
-        let cycle = elapsedMs % 1_250
-        let rumble: (leftMotor: UInt8, rightMotor: UInt8)
-        switch cycle {
-        case 0..<110:
-            rumble = (leftMotor: 224, rightMotor: 40)
-        case 185..<285:
-            rumble = (leftMotor: 112, rightMotor: 20)
-        default:
-            rumble = (leftMotor: 0, rightMotor: 0)
-        }
+        let intervalMs = heartbeatIntervalMs
+        let durationMs = heartbeatDurationMs
+        let totalCycle = max(UInt64(intervalMs + durationMs), 800)
+        let cycle = elapsedMs % totalCycle
+        let rumble = heartbeatStrength(at: cycle, intervalMs: intervalMs, durationMs: durationMs)
         let lightbar: (red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?)
-        if (elapsedMs / 280).isMultiple(of: 2) {
+        if cycle < UInt64(intervalMs) {
             lightbar = (red: 255, green: 0, blue: 0, brightness: brightness)
         } else {
             lightbar = (red: 0, green: 0, blue: 255, brightness: brightness)

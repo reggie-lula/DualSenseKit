@@ -1,6 +1,8 @@
 import AppKit
 
+@MainActor
 private var retainedAppDelegate: AppDelegate?
+@MainActor
 private var retainedCoordinator: AppCoordinator?
 
 @MainActor

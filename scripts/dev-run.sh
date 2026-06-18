@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-cd /Users/reggie/Documents/DSCoder
 scripts/build.sh
 pkill -f './.manual-build/DualSenseKitDemo --headless-server' || true
+ls ./
 ./.manual-build/DualSenseKitDemo --headless-server

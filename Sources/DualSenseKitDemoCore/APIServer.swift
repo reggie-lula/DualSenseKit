@@ -190,8 +190,12 @@ final class APIServer: @unchecked Sendable {
 
         case ("POST", "/v1/effects/police-heartbeat/start"):
             do {
-                let request = try JSONDecoder().decode(LightbarRequest.self, from: request.body)
-                let ok = controllerService.startPoliceHeartbeatPattern(brightness: request.brightness)
+                let request = try JSONDecoder().decode(HeartbeatRequest.self, from: request.body)
+                let ok = controllerService.startPoliceHeartbeatPattern(
+                    brightness: request.brightness,
+                    intervalMs: request.intervalMs ?? 260,
+                    durationMs: request.durationMs ?? 160
+                )
                 send(status: ok ? 200 : 409, json: ["ok": "\(ok)", "mode": "police-heartbeat"], connection: connection)
             } catch {
                 let ok = controllerService.startPoliceHeartbeatPattern()
@@ -626,6 +630,8 @@ final class APIServer: @unchecked Sendable {
                 <div class="control-row"><label>灯带颜色</label><input id="lightbarColor" type="color" value="#00ff00"></div>
                 <div class="control-row"><label>灯带亮度</label><input id="lightbarBrightness" type="range" min="0" max="1" step="0.01" value="1"></div>
                 <div class="actions" style="margin-bottom:8px"><button data-rgb="255,0,0">红</button><button data-rgb="0,255,0">绿</button><button data-rgb="0,0,255">蓝</button><button data-rgb="255,255,255">白</button><button data-rgb="0,0,0">关闭</button></div>
+                <div class="control-row"><label>心跳间隔 (ms)</label><input id="heartbeatInterval" type="number" min="20" max="2000" step="10" value="260"></div>
+                <div class="control-row"><label>节拍时长 (ms)</label><input id="heartbeatDuration" type="number" min="20" max="1000" step="10" value="160"></div>
                 <div class="actions" style="margin-bottom:8px"><button id="startPoliceLightbar">红蓝警灯 + 心跳震动</button><button id="stopPoliceLightbar">停止警灯动画</button></div>
                 <div class="control-row compact"><label>玩家指示灯</label><div class="segmented"><button data-mask="0">关</button><button data-mask="4">1</button><button data-mask="10">2</button><button data-mask="21">3</button><button data-mask="27">4</button><button data-mask="31">全部</button></div></div>
                 <div class="control-row compact"><label>玩家灯亮度</label><div class="segmented"><button data-player-brightness="0">亮</button><button data-player-brightness="1">中</button><button data-player-brightness="2">暗</button></div></div>
@@ -984,7 +990,11 @@ final class APIServer: @unchecked Sendable {
           }
           function startPoliceLightbar() {
             stopLocalPoliceTimers();
-            const body = {brightness: Number(document.querySelector("#lightbarBrightness").value)};
+            const body = {
+              brightness: Number(document.querySelector("#lightbarBrightness").value),
+              intervalMs: Number(document.querySelector("#heartbeatInterval").value),
+              durationMs: Number(document.querySelector("#heartbeatDuration").value)
+            };
             postJSON("/v1/effects/police-heartbeat/start", body, "policeHeartbeat.start").catch(error => {
               appendLog({type:"ui.action.failure", payload:{action:"policeHeartbeat.start", error:String(error)}});
             });

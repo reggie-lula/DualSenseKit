@@ -238,6 +238,12 @@ struct LightbarRequest: Codable, Equatable, Sendable {
     var brightness: Float? = nil
 }
 
+struct HeartbeatRequest: Codable, Equatable, Sendable {
+    var intervalMs: Int? = nil
+    var durationMs: Int? = nil
+    var brightness: Float? = nil
+}
+
 struct RumbleRequest: Codable, Equatable, Sendable {
     var left: Float? = nil
     var right: Float? = nil

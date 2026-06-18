@@ -104,9 +104,9 @@ final class ControllerService: @unchecked Sendable {
         return hidService.setRumble(left: heavy, right: light, durationMs: request.durationMs)
     }
 
-    func startPoliceHeartbeatPattern(brightness: Float? = nil) -> Bool {
+    func startPoliceHeartbeatPattern(brightness: Float? = nil, intervalMs: Int = 260, durationMs: Int = 160) -> Bool {
         let safeBrightness = brightness.map { UInt8(clamping: Int(clamp01($0) * 2)) }
-        return hidService.startPoliceHeartbeatPattern(brightness: safeBrightness)
+        return hidService.startPoliceHeartbeatPattern(brightness: safeBrightness, intervalMs: intervalMs, durationMs: durationMs)
     }
 
     func stopEffectPattern() -> Bool {
