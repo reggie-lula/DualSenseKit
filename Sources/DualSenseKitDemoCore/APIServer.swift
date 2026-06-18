@@ -612,6 +612,7 @@ final class APIServer: @unchecked Sendable {
                 <div class="control-row"><label>灯带颜色</label><input id="lightbarColor" type="color" value="#00ff00"></div>
                 <div class="control-row"><label>灯带亮度</label><input id="lightbarBrightness" type="range" min="0" max="1" step="0.01" value="1"></div>
                 <div class="actions" style="margin-bottom:8px"><button data-rgb="255,0,0">红</button><button data-rgb="0,255,0">绿</button><button data-rgb="0,0,255">蓝</button><button data-rgb="255,255,255">白</button><button data-rgb="0,0,0">关闭</button></div>
+                <div class="actions" style="margin-bottom:8px"><button id="startPoliceLightbar">红蓝警灯 + 心跳震动</button><button id="stopPoliceLightbar">停止警灯动画</button></div>
                 <div class="control-row compact"><label>玩家指示灯</label><div class="segmented"><button data-mask="0">关</button><button data-mask="4">1</button><button data-mask="10">2</button><button data-mask="21">3</button><button data-mask="27">4</button><button data-mask="31">全部</button></div></div>
                 <div class="control-row compact"><label>玩家灯亮度</label><div class="segmented"><button data-player-brightness="0">亮</button><button data-player-brightness="1">中</button><button data-player-brightness="2">暗</button></div></div>
                 <div class="control-row"><label>震动（重）</label><input id="heavyRumble" type="range" min="0" max="1" step="0.01" value="0"></div>
@@ -652,10 +653,13 @@ final class APIServer: @unchecked Sendable {
               <section class="module">
                 <h2>发包日志</h2>
                 <div class="log-tools">
+                  <button id="startLogListen">开始监听</button>
+                  <button id="stopLogListen">停止监听</button>
                   <button id="pauseLog">暂停</button>
                   <button id="clearLog">清空</button>
                   <select id="logFilter"><option value="all">全部</option><option value="output">发包</option><option value="failure">失败</option><option value="input">输入</option><option value="ui">UI 操作</option></select>
                 </div>
+                <div id="logListenStatus" class="audio-note">实时监听：未开启</div>
                 <div id="packetLog"></div>
               </section>
             </aside>
@@ -723,10 +727,17 @@ final class APIServer: @unchecked Sendable {
           const highRateLogTimes = new Map();
           let logPaused = false;
           let logFilter = "all";
+          let eventSocket = null;
+          let eventReconnectTimer = null;
+          let eventListening = false;
           let currentPlayerMask = 0;
           let currentPlayerBrightness = 0;
           let rumbleTimer = null;
           let triggerTimer = null;
+          let policeLightbarTimer = null;
+          let heartbeatTimer = null;
+          let heartbeatTimeouts = [];
+          let policeLightbarStep = { value: 0 };
           let hidVolumeTimer = null;
           let systemVolumeTimer = null;
           const touchState = { primary: null, secondary: null };
@@ -893,6 +904,40 @@ final class APIServer: @unchecked Sendable {
             return json;
           }
           async function sendRumble(heavy, light, durationMs = 0) { await requestJSON("/v1/haptics/rumble", {heavy, light, durationMs}, "rumble"); }
+          function scheduleHeartbeatRumble() {
+            stopHeartbeatRumble(false);
+            const pulse = (heavy, light, durationMs, delayMs) => {
+              const timeout = setTimeout(() => {
+                sendRumble(heavy, light, durationMs).catch(error => {
+                  appendLog({type:"ui.action.failure", payload:{action:"heartbeatRumble", error:String(error)}});
+                });
+              }, delayMs);
+              heartbeatTimeouts.push(timeout);
+            };
+            const beat = () => {
+              heartbeatTimeouts.splice(0).forEach(clearTimeout);
+              pulse(0.88, 0.16, 95, 0);
+              pulse(0.00, 0.00, 0, 115);
+              pulse(0.42, 0.08, 80, 190);
+              pulse(0.00, 0.00, 0, 285);
+            };
+            beat();
+            heartbeatTimer = setInterval(beat, 1250);
+            uiAction("heartbeatRumble.start", "/v1/haptics/rumble", {pattern:"strong-weak-pause", intervalMs:1250});
+          }
+          function stopHeartbeatRumble(logAction = true) {
+            if (heartbeatTimer) {
+              clearInterval(heartbeatTimer);
+              heartbeatTimer = null;
+            }
+            heartbeatTimeouts.splice(0).forEach(clearTimeout);
+            if (logAction) {
+              uiAction("heartbeatRumble.stop", "/v1/haptics/rumble", {});
+              sendRumble(0, 0, 0).catch(error => {
+                appendLog({type:"ui.action.failure", payload:{action:"heartbeatRumble.stop", error:String(error)}});
+              });
+            }
+          }
           function triggerPayload(side) {
             return {mode: document.querySelector("#" + side + "TriggerMode").value, startPosition: Number(document.querySelector("#" + side + "TriggerStart").value), strength: Number(document.querySelector("#" + side + "TriggerStrength").value)};
           }
@@ -906,6 +951,40 @@ final class APIServer: @unchecked Sendable {
             const color = document.querySelector("#lightbarColor").value;
             const body = {r: parseInt(color.slice(1,3), 16), g: parseInt(color.slice(3,5), 16), b: parseInt(color.slice(5,7), 16), brightness: Number(document.querySelector("#lightbarBrightness").value)};
             await requestJSON("/v1/light/lightbar", body, "lightbar");
+          }
+          async function sendLightbarRGB(r, g, b, action) {
+            document.querySelector("#lightbarColor").value = "#" + [r,g,b].map(v => v.toString(16).padStart(2, "0")).join("");
+            const body = {r, g, b, brightness: Number(document.querySelector("#lightbarBrightness").value)};
+            await requestJSON("/v1/light/lightbar", body, action);
+          }
+          function startPoliceLightbar() {
+            stopPoliceLightbar(false);
+            policeLightbarStep.value = 0;
+            const frames = [
+              [255, 0, 0],
+              [0, 0, 255]
+            ];
+            const tick = () => {
+              const frame = frames[policeLightbarStep.value % frames.length];
+              policeLightbarStep.value += 1;
+              sendLightbarRGB(frame[0], frame[1], frame[2], "policeLightbar").catch(error => {
+                appendLog({type:"ui.action.failure", payload:{action:"policeLightbar", error:String(error)}});
+              });
+            };
+            tick();
+            policeLightbarTimer = setInterval(tick, 280);
+            scheduleHeartbeatRumble();
+            uiAction("policeLightbar.start", "/v1/light/lightbar", {intervalMs: 280, frames: "red-blue"});
+          }
+          function stopPoliceLightbar(logAction = true) {
+            if (policeLightbarTimer) {
+              clearInterval(policeLightbarTimer);
+              policeLightbarTimer = null;
+            }
+            stopHeartbeatRumble(logAction);
+            if (logAction) {
+              uiAction("policeLightbar.stop", "/v1/light/lightbar", {});
+            }
           }
           let lastRecordingPath = "";
           async function refreshAudioDevices() {
@@ -1010,6 +1089,7 @@ final class APIServer: @unchecked Sendable {
             document.querySelector("#audioRecordStatus").textContent = "录音：" + result.status + " " + result.message + (result.outputPath ? " -> " + result.outputPath : "");
           }
           ["heavyRumble","lightRumble"].forEach(id => document.querySelector("#" + id).addEventListener("input", () => {
+            stopHeartbeatRumble(false);
             clearTimeout(rumbleTimer);
             rumbleTimer = setTimeout(() => sendRumble(Number(document.querySelector("#heavyRumble").value), Number(document.querySelector("#lightRumble").value), 1000), 60);
           }));
@@ -1019,7 +1099,10 @@ final class APIServer: @unchecked Sendable {
             triggerTimer = setTimeout(sendTriggers, 80);
           }));
           document.querySelector("#lightbarBrightness").addEventListener("input", sendLightbar);
-          document.querySelector("#lightbarColor").addEventListener("input", sendLightbar);
+          document.querySelector("#lightbarColor").addEventListener("input", () => {
+            stopPoliceLightbar(false);
+            sendLightbar();
+          });
           document.querySelector("#micLEDMode").addEventListener("change", sendMicLED);
           document.querySelector("#refreshAudio").addEventListener("click", refreshAudioDevices);
           document.querySelector("#audioOutputSelect").addEventListener("change", refreshVolumeState);
@@ -1046,6 +1129,7 @@ final class APIServer: @unchecked Sendable {
           document.querySelector("#logFilter").addEventListener("change", event => { logFilter = event.target.value; renderLog(); });
           document.addEventListener("click", async event => {
             if (event.target.dataset.rgb) {
+              stopPoliceLightbar(false);
               const [r,g,b] = event.target.dataset.rgb.split(",").map(Number);
               document.querySelector("#lightbarColor").value = "#" + [r,g,b].map(v => v.toString(16).padStart(2, "0")).join("");
               await sendLightbar();
@@ -1058,6 +1142,12 @@ final class APIServer: @unchecked Sendable {
             if (event.target.id === "sequence") {
               uiAction("light-sequence", "/v1/test/light-sequence", {});
               await fetch("/v1/test/light-sequence", {method:"POST", headers: authHeaders()});
+            }
+            if (event.target.id === "startPoliceLightbar") {
+              startPoliceLightbar();
+            }
+            if (event.target.id === "stopPoliceLightbar") {
+              stopPoliceLightbar();
             }
             if (event.target.id === "stopRumble") {
               document.querySelector("#heavyRumble").value = "0";
@@ -1079,16 +1169,54 @@ final class APIServer: @unchecked Sendable {
             recent.forEach(addEvent);
           }
           function connectEvents() {
+            if (!eventListening || eventSocket) return;
+            const status = document.querySelector("#logListenStatus");
+            status.textContent = "实时监听：连接中";
             const ws = new WebSocket("ws://" + location.host + "/v1/events?token=" + encodeURIComponent(TOKEN));
+            eventSocket = ws;
+            ws.onopen = () => {
+              status.textContent = "实时监听：已开启";
+            };
             ws.onmessage = message => addEvent(JSON.parse(message.data));
-            ws.onclose = () => setTimeout(connectEvents, 1000);
+            ws.onclose = () => {
+              if (eventSocket === ws) eventSocket = null;
+              if (eventListening) {
+                status.textContent = "实时监听：已断开，准备重连";
+                clearTimeout(eventReconnectTimer);
+                eventReconnectTimer = setTimeout(connectEvents, 1000);
+              } else {
+                status.textContent = "实时监听：未开启";
+              }
+            };
+            ws.onerror = () => {
+              status.textContent = "实时监听：连接错误";
+            };
           }
+          function startEventListening() {
+            if (eventListening) return;
+            eventListening = true;
+            logEntries.length = 0;
+            renderLog();
+            loadRecent();
+            connectEvents();
+          }
+          function stopEventListening() {
+            eventListening = false;
+            clearTimeout(eventReconnectTimer);
+            eventReconnectTimer = null;
+            if (eventSocket) {
+              const socket = eventSocket;
+              eventSocket = null;
+              socket.close();
+            }
+            document.querySelector("#logListenStatus").textContent = "实时监听：未开启";
+          }
+          document.querySelector("#startLogListen").addEventListener("click", startEventListening);
+          document.querySelector("#stopLogListen").addEventListener("click", stopEventListening);
           renderButtons();
           refreshStatus();
           refreshAudioDevices();
           refreshHIDAudioStatus();
-          loadRecent();
-          connectEvents();
           setInterval(refreshStatus, 1500);
           setInterval(refreshHIDAudioStatus, 3000);
           </script>
