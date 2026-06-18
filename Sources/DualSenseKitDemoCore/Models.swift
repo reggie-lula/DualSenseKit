@@ -183,10 +183,24 @@ struct BridgeConfig: Codable, Equatable, Sendable {
     var mappings: [ButtonGesture: [Action]] = BridgeConfig.defaultMappings()
 
     static func defaultMappings() -> [ButtonGesture: [Action]] {
-        [
-            ButtonGesture(button: .touchpadButton, kind: .singleClick): [.mouseClick(.left)],
+        let tabKeyCode: UInt16 = 48
+        let enterKeyCode: UInt16 = 36
+        let mappings: [ButtonGesture: [Action]] = [
+            ButtonGesture(button: .buttonA, kind: .singleClick): [
+                .keyStroke(KeyStroke(keyCode: enterKeyCode, modifiers: []))
+            ],
+            ButtonGesture(button: .rightShoulder, kind: .singleClick): [
+                .keyStroke(KeyStroke(keyCode: tabKeyCode, modifiers: [.command]))
+            ],
+            ButtonGesture(button: .leftShoulder, kind: .singleClick): [
+                .keyStroke(KeyStroke(keyCode: tabKeyCode, modifiers: [.command, .shift]))
+            ],
+            ButtonGesture(button: .leftThumbstickButton, kind: .singleClick): [.mouseClick(.left)],
+            ButtonGesture(button: .rightThumbstickButton, kind: .singleClick): [.mouseClick(.right)],
+            ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick): [.mouseClick(.left)],
             ButtonGesture(button: .touchpadTwoFingerTap, kind: .singleClick): [.mouseClick(.right)]
         ]
+        return mappings
     }
 }
 

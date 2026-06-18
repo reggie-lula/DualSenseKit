@@ -7,6 +7,7 @@ final class ControllerService: @unchecked Sendable {
     private let configStore: ConfigStore
     private let actionExecutor: ActionExecutor
     private let touchpadMapper = TouchpadMouseMapper()
+    private let stickMouseMapper = StickMouseMapper()
     private let stateQueue = DispatchQueue(label: "DualSenseKitDemo.ControllerState")
     private lazy var hidService = DualSenseHIDService(
         buttonUpdate: { [weak self] button, pressed, value in
@@ -30,6 +31,10 @@ final class ControllerService: @unchecked Sendable {
             ($0, ControllerButtonState(button: $0, pressed: false, value: 0))
         }
     )
+    private var leftStickX: Float = 0
+    private var leftStickY: Float = 0
+    private var leftStickTimer: DispatchSourceTimer?
+    private var primaryTouchTapStart: (date: Date, x: Float, y: Float, maxDistance: Double)?
     private lazy var recognizer = ButtonGestureRecognizer(
         configProvider: { [weak self] in self?.configStore.current.gestures ?? GestureTimingConfig() },
         emit: { [weak self] gesture in self?.handleGesture(gesture) }
@@ -83,6 +88,7 @@ final class ControllerService: @unchecked Sendable {
     }
 
     func stop() {
+        stopLeftStickMouseTimer()
         hidService.stop()
         GCController.stopWirelessControllerDiscovery()
         NotificationCenter.default.removeObserver(self)
@@ -178,6 +184,7 @@ final class ControllerService: @unchecked Sendable {
         guard let controller = notification.object as? GCController else { return }
         if controller === connectedController {
             connectedController = nil
+            stopLeftStickMouseTimer()
             eventBus.publish(BridgeEvent(type: "controller.disconnected", payload: [:]))
         }
     }
@@ -197,6 +204,7 @@ final class ControllerService: @unchecked Sendable {
         gamepad.valueChangedHandler = { [weak self] gamepad, element in
             guard let self else { return }
             self.handleStandardButtons(gamepad: gamepad, changedElement: element)
+            self.updateLeftStickMouse(x: gamepad.leftThumbstick.xAxis.value, y: -gamepad.leftThumbstick.yAxis.value)
         }
     }
 
@@ -286,22 +294,70 @@ final class ControllerService: @unchecked Sendable {
     }
 
     private func handleHIDAxis(name: String, value: Float) {
+        switch name {
+        case "leftStickX":
+            updateLeftStickMouse(x: value, y: leftStickY)
+        case "leftStickY":
+            updateLeftStickMouse(x: leftStickX, y: value)
+        default:
+            break
+        }
         eventBus.publish(BridgeEvent(type: "hid.axis", payload: [
             "axis": name,
             "value": "\(value)"
         ]))
     }
 
+    private func updateLeftStickMouse(x: Float, y: Float) {
+        leftStickX = x
+        leftStickY = y
+        if leftStickMagnitudeExceedsDeadZone(x: x, y: y) {
+            startLeftStickMouseTimer()
+        } else {
+            stopLeftStickMouseTimer()
+        }
+    }
+
+    private func leftStickMagnitudeExceedsDeadZone(x: Float, y: Float) -> Bool {
+        abs(x) > 0.15 || abs(y) > 0.15
+    }
+
+    private func startLeftStickMouseTimer() {
+        guard leftStickTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: stateQueue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(16))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let x = self.leftStickX
+            let y = self.leftStickY
+            guard self.leftStickMagnitudeExceedsDeadZone(x: x, y: y) else {
+                self.stopLeftStickMouseTimer()
+                return
+            }
+            _ = self.stickMouseMapper.move(leftStickX: x, leftStickY: y, config: self.configStore.current.touchpad)
+        }
+        leftStickTimer = timer
+        timer.resume()
+    }
+
+    private func stopLeftStickMouseTimer() {
+        leftStickTimer?.cancel()
+        leftStickTimer = nil
+    }
+
     private func handleHIDTouch(name: String, x: Float, y: Float, active: Bool) {
         switch name {
         case "primary":
             if active {
+                beginOrUpdatePrimaryTapCandidate(x: x, y: y)
                 touchpadMapper.primaryMoved(x: x, y: y, config: configStore.current.touchpad)
             } else {
+                finishPrimaryTapCandidate(x: x, y: y)
                 touchpadMapper.resetPrimary()
             }
         case "secondary":
             if active {
+                primaryTouchTapStart = nil
                 touchpadMapper.secondaryMoved(x: x, y: y, config: configStore.current.touchpad)
             } else {
                 touchpadMapper.resetSecondary()
@@ -315,6 +371,30 @@ final class ControllerService: @unchecked Sendable {
             "y": "\(y)",
             "active": "\(active)"
         ]))
+    }
+
+    private func beginOrUpdatePrimaryTapCandidate(x: Float, y: Float) {
+        if primaryTouchTapStart == nil {
+            primaryTouchTapStart = (Date(), x, y, 0)
+            return
+        }
+        guard var start = primaryTouchTapStart else { return }
+        let dx = Double(x - start.x)
+        let dy = Double(y - start.y)
+        start.maxDistance = max(start.maxDistance, sqrt(dx * dx + dy * dy))
+        primaryTouchTapStart = start
+    }
+
+    private func finishPrimaryTapCandidate(x: Float, y: Float) {
+        defer { primaryTouchTapStart = nil }
+        guard let start = primaryTouchTapStart else { return }
+        let duration = Date().timeIntervalSince(start.date)
+        let dx = Double(x - start.x)
+        let dy = Double(y - start.y)
+        let distance = max(start.maxDistance, sqrt(dx * dx + dy * dy))
+        guard duration <= 0.22, distance <= 0.035 else { return }
+        recognizer.update(button: .touchpadOneFingerTap, pressed: true)
+        recognizer.update(button: .touchpadOneFingerTap, pressed: false)
     }
 
     private func handleHIDMotion(_ motion: DualSenseMotion) {

@@ -28,6 +28,40 @@ struct SelfTest {
         let configData = try JSONEncoder().encode(config)
         let decodedConfig = try JSONDecoder().decode(BridgeConfig.self, from: configData)
         expect(decodedConfig == config, "BridgeConfig should round-trip through JSON")
+        var legacyConfig = BridgeConfig()
+        legacyConfig.mappings = [
+            ButtonGesture(button: .touchpadButton, kind: .singleClick): [.mouseClick(.left)]
+        ]
+        let legacyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dualsensekit-legacy-\(UUID().uuidString)")
+            .appendingPathComponent("config.json")
+        try FileManager.default.createDirectory(
+            at: legacyURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try JSONEncoder().encode(legacyConfig).write(to: legacyURL)
+        let migratedConfig = ConfigStore(configURL: legacyURL).load()
+        expect(
+            migratedConfig.mappings[ButtonGesture(button: .rightShoulder, kind: .singleClick)] == [
+                .keyStroke(KeyStroke(keyCode: 48, modifiers: [.command]))
+            ],
+            "legacy config should receive missing default shoulder mappings"
+        )
+        expect(
+            migratedConfig.mappings[ButtonGesture(button: .buttonA, kind: .singleClick)] == [
+                .keyStroke(KeyStroke(keyCode: 36, modifiers: []))
+            ],
+            "legacy config should receive missing default cross button enter mapping"
+        )
+        expect(
+            migratedConfig.mappings[ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick)] == [.mouseClick(.left)],
+            "legacy config should migrate left click to one-finger touchpad tap"
+        )
+        expect(
+            migratedConfig.mappings[ButtonGesture(button: .touchpadButton, kind: .singleClick)] == nil,
+            "legacy default physical touchpad click should be removed from left click mapping"
+        )
+        try? FileManager.default.removeItem(at: legacyURL.deletingLastPathComponent())
 
         let rgb = RGBColorRequest(r: 255, g: 64, b: 0)
         let rgbData = try JSONEncoder().encode(rgb)
@@ -150,9 +184,52 @@ struct SelfTest {
         timeoutMapper.primaryMoved(x: 0.9, y: 0.8, config: touchpad)
         expect(timeoutPoster.moves.count == 2, "movement after inactivity reseed should move cursor")
         expect(
-            BridgeConfig.defaultMappings()[ButtonGesture(button: .touchpadButton, kind: .singleClick)] == [.mouseClick(.left)],
-            "touchpad button single click should default to left mouse click"
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick)] == [.mouseClick(.left)],
+            "one-finger touchpad tap should default to left mouse click"
         )
+        expect(
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .touchpadButton, kind: .singleClick)] == nil,
+            "physical touchpad button should not default to left mouse click"
+        )
+        expect(
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .buttonA, kind: .singleClick)] == [
+                .keyStroke(KeyStroke(keyCode: 36, modifiers: []))
+            ],
+            "cross button single click should default to enter"
+        )
+        expect(
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .leftThumbstickButton, kind: .singleClick)] == [.mouseClick(.left)],
+            "left thumbstick button single click should default to left mouse click"
+        )
+        expect(
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .rightThumbstickButton, kind: .singleClick)] == [.mouseClick(.right)],
+            "right thumbstick button single click should default to right mouse click"
+        )
+        expect(
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .rightShoulder, kind: .singleClick)] == [
+                .keyStroke(KeyStroke(keyCode: 48, modifiers: [.command]))
+            ],
+            "right shoulder single click should default to next application"
+        )
+        expect(
+            BridgeConfig.defaultMappings()[ButtonGesture(button: .leftShoulder, kind: .singleClick)] == [
+                .keyStroke(KeyStroke(keyCode: 48, modifiers: [.command, .shift]))
+            ],
+            "left shoulder single click should default to previous application"
+        )
+
+        let stickPoster = RecordingMousePoster()
+        let stickMapper = StickMouseMapper(mousePoster: stickPoster, deadZone: 0.15, maxStep: 20)
+        expect(!stickMapper.move(leftStickX: 0.1, leftStickY: 0.1, config: touchpad), "stick dead zone should suppress cursor movement")
+        expect(stickPoster.moves.isEmpty, "stick dead zone should not post cursor movement")
+        expect(stickMapper.move(leftStickX: 1, leftStickY: 0, config: touchpad), "stick outside dead zone should move cursor")
+        expect(stickPoster.moves.count == 1 && stickPoster.moves[0].0 > 0, "right stick movement should move cursor right")
+        expect(stickMapper.move(leftStickX: 0, leftStickY: -1, config: touchpad), "stick y outside dead zone should move cursor")
+        expect(stickPoster.moves.count == 2 && stickPoster.moves[1].1 > 0, "up stick movement should move cursor up")
+        var disabledTouchpad = touchpad
+        disabledTouchpad.enabled = false
+        expect(!stickMapper.move(leftStickX: 1, leftStickY: 0, config: disabledTouchpad), "disabled touchpad mouse config should suppress stick movement")
+        expect(stickPoster.moves.count == 2, "disabled touchpad mouse config should not post stick movement")
 
         var emitted: [ButtonGesture] = []
         let recognizer = ButtonGestureRecognizer(

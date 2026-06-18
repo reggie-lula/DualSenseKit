@@ -26,7 +26,8 @@ final class ConfigStore: @unchecked Sendable {
 
             do {
                 let data = try Data(contentsOf: configURL)
-                current = try decoder.decode(BridgeConfig.self, from: data)
+                current = try decoder.decode(BridgeConfig.self, from: data).addingMissingDefaultMappings()
+                persist(current)
             } catch {
                 current = BridgeConfig()
             }
@@ -52,5 +53,19 @@ final class ConfigStore: @unchecked Sendable {
         } catch {
             NSLog("DualSenseKitDemo config save failed: \(error)")
         }
+    }
+}
+
+private extension BridgeConfig {
+    func addingMissingDefaultMappings() -> BridgeConfig {
+        var migrated = self
+        let physicalTouchpadClick = ButtonGesture(button: .touchpadButton, kind: .singleClick)
+        if migrated.mappings[physicalTouchpadClick] == [.mouseClick(.left)] {
+            migrated.mappings[physicalTouchpadClick] = nil
+        }
+        for (gesture, actions) in BridgeConfig.defaultMappings() where migrated.mappings[gesture] == nil {
+            migrated.mappings[gesture] = actions
+        }
+        return migrated
     }
 }
