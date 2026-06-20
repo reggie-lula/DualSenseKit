@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import DualSenseKitRuntime
 
 @MainActor
 final class SettingsWindowController: NSWindowController {

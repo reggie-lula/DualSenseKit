@@ -2,20 +2,20 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-final class ActionExecutor: @unchecked Sendable {
+public final class ActionExecutor: @unchecked Sendable {
     private let permissionService: PermissionService
 
-    init(permissionService: PermissionService) {
+    public init(permissionService: PermissionService) {
         self.permissionService = permissionService
     }
 
-    func execute(_ actions: [Action], config: BridgeConfig) {
+    public func execute(_ actions: [Action], config: BridgeConfig) {
         for action in actions {
             execute(action, config: config)
         }
     }
 
-    func execute(_ action: Action, config: BridgeConfig) {
+    public func execute(_ action: Action, config: BridgeConfig) {
         switch action {
         case .keyStroke(let stroke):
             postKeyStroke(stroke)
@@ -37,7 +37,7 @@ final class ActionExecutor: @unchecked Sendable {
         }
     }
 
-    func isShellCommandAllowed(_ command: String, shellConfig: ShellConfig) -> Bool {
+    public func isShellCommandAllowed(_ command: String, shellConfig: ShellConfig) -> Bool {
         guard shellConfig.enabled else { return false }
         if shellConfig.allowedCommands.contains(command) {
             return true

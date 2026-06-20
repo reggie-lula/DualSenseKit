@@ -1,13 +1,15 @@
 import ApplicationServices
 import Foundation
 
-final class PermissionService: @unchecked Sendable {
-    func isAccessibilityTrusted() -> Bool {
+public final class PermissionService: @unchecked Sendable {
+    public init() {}
+
+    public func isAccessibilityTrusted() -> Bool {
         AXIsProcessTrusted()
     }
 
     @discardableResult
-    func requestAccessibilityTrust() -> Bool {
+    public func requestAccessibilityTrust() -> Bool {
         let options = [
             "AXTrustedCheckOptionPrompt": true
         ] as CFDictionary

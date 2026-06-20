@@ -3,7 +3,7 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+public final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
     private let synthesizer = AVSpeechSynthesizer()
     private let queue = DispatchQueue(label: "DualSenseKitDemo.AudioService")
     private var player: AVAudioPlayer?
@@ -17,14 +17,14 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
     private var hidHeadphoneVolume: Float = 0.65
     private var hidSpeakerVolume: Float = 0.85
 
-    func capability() -> AudioCapability {
+    public func capability() -> AudioCapability {
         if dualSenseOutputDevice() != nil {
             return .dualSenseOutputAvailable
         }
         return .unsupported
     }
 
-    func devices() -> AudioDevicesResponse {
+    public func devices() -> AudioDevicesResponse {
         let defaultInput = defaultInputDeviceID()
         let defaultOutput = defaultOutputDeviceID()
         let allDevices = audioDeviceIDs().map { deviceInfo(deviceID: $0, defaultInput: defaultInput, defaultOutput: defaultOutput) }
@@ -57,17 +57,17 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         )
     }
 
-    func dualSenseOutputDevice() -> AudioOutputDevice? {
+    public func dualSenseOutputDevice() -> AudioOutputDevice? {
         devices().outputs.first(where: \.isDualSenseCandidate).map {
             AudioOutputDevice(id: $0.id, name: $0.name, uid: $0.uid)
         }
     }
 
-    func outputDevices() -> [AudioOutputDevice] {
+    public func outputDevices() -> [AudioOutputDevice] {
         devices().outputs.map { AudioOutputDevice(id: $0.id, name: $0.name, uid: $0.uid) }
     }
 
-    func play(_ request: PlayAudioRequest) -> PlayAudioResult {
+    public func play(_ request: PlayAudioRequest) -> PlayAudioResult {
         let audioDevices = devices()
         let requestedOutput = request.outputDeviceID.flatMap { id in
             audioDevices.outputs.first { $0.id == id }
@@ -152,7 +152,7 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         }
     }
 
-    func updateHIDVolumeCache(_ request: AudioVolumeRequest) {
+    public func updateHIDVolumeCache(_ request: AudioVolumeRequest) {
         queue.sync {
             if let headphone = request.headphone {
                 hidHeadphoneVolume = clamp01(headphone)
@@ -163,7 +163,7 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         }
     }
 
-    func volumeState(outputDeviceID: UInt32?) -> AudioVolumeState {
+    public func volumeState(outputDeviceID: UInt32?) -> AudioVolumeState {
         queue.sync {
             let audioDevices = devices()
             let output: AudioDeviceInfo?
@@ -189,7 +189,7 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         }
     }
 
-    func setSystemVolume(_ request: SystemVolumeRequest) -> AudioVolumeState {
+    public func setSystemVolume(_ request: SystemVolumeRequest) -> AudioVolumeState {
         queue.sync {
             let audioDevices = devices()
             let output: AudioDeviceInfo?
@@ -238,7 +238,7 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         }
     }
 
-    func say(_ request: SayAudioRequest) -> AudioCapability {
+    public func say(_ request: SayAudioRequest) -> AudioCapability {
         let capability = capability()
         guard capability == .dualSenseOutputAvailable || request.useMacFallback == true else {
             return .unsupported
@@ -254,7 +254,7 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         return .macFallback
     }
 
-    func startRecording(_ request: RecordAudioRequest) -> RecordAudioStatus {
+    public func startRecording(_ request: RecordAudioRequest) -> RecordAudioStatus {
         queue.sync {
             if recorder?.isRecording == true {
                 return currentRecordStatus(message: "Recording is already active.")
@@ -356,7 +356,7 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         }
     }
 
-    func stopRecording() -> RecordAudioStatus {
+    public func stopRecording() -> RecordAudioStatus {
         queue.sync {
             guard let recorder else {
                 return currentRecordStatus(message: "No recording is active.")
@@ -371,7 +371,7 @@ final class AudioService: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         }
     }
 
-    func recordingStatus() -> RecordAudioStatus {
+    public func recordingStatus() -> RecordAudioStatus {
         queue.sync {
             currentRecordStatus(message: recorder?.isRecording == true ? "Recording is active." : "No recording is active.")
         }

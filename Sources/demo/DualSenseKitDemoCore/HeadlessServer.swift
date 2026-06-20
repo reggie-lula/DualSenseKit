@@ -1,4 +1,5 @@
 import Foundation
+import DualSenseKitRuntime
 
 @MainActor
 public func runDualSenseKitDemoHeadlessServer() {

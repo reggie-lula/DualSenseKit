@@ -2,19 +2,19 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-protocol MousePosting {
+public protocol MousePosting {
     func moveBy(dx: Double, dy: Double)
     func scroll(dx: Int32, dy: Int32)
 }
 
-final class MouseEventPoster: MousePosting {
+public final class MouseEventPoster: MousePosting {
     private let permissionService: PermissionService
 
-    init(permissionService: PermissionService = PermissionService()) {
+    public init(permissionService: PermissionService = PermissionService()) {
         self.permissionService = permissionService
     }
 
-    func moveBy(dx: Double, dy: Double) {
+    public func moveBy(dx: Double, dy: Double) {
         guard permissionService.isAccessibilityTrusted() else { return }
         let current = NSEvent.mouseLocation
         let screenFrame = Self.screenFrame(containing: current) ?? Self.unionScreenFrame()
@@ -29,7 +29,7 @@ final class MouseEventPoster: MousePosting {
             .post(tap: .cghidEventTap)
     }
 
-    func scroll(dx: Int32, dy: Int32) {
+    public func scroll(dx: Int32, dy: Int32) {
         guard permissionService.isAccessibilityTrusted() else { return }
         CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)?
             .post(tap: .cghidEventTap)

@@ -1,6 +1,6 @@
 import Foundation
 
-final class TouchpadMouseMapper {
+public final class TouchpadMouseMapper {
     private let mousePoster: MousePosting
     private var lastPrimary: (x: Float, y: Float)?
     private var lastSecondary: (x: Float, y: Float)?
@@ -11,33 +11,33 @@ final class TouchpadMouseMapper {
     private var secondaryActive = false
     private let inactivityInterval: TimeInterval
 
-    init(mousePoster: MousePosting = MouseEventPoster(), inactivityInterval: TimeInterval = 0.15) {
+    public init(mousePoster: MousePosting = MouseEventPoster(), inactivityInterval: TimeInterval = 0.15) {
         self.mousePoster = mousePoster
         self.inactivityInterval = inactivityInterval
     }
 
-    func resetPrimary() {
+    public func resetPrimary() {
         lastPrimary = nil
         lastPrimaryUpdate = nil
         smoothedPrimaryDX = 0
         smoothedPrimaryDY = 0
     }
 
-    func resetSecondary() {
+    public func resetSecondary() {
         lastSecondary = nil
         lastSecondaryUpdate = nil
         secondaryActive = false
         resetPrimary()
     }
 
-    func secondaryBegan(x: Float, y: Float) {
+    public func secondaryBegan(x: Float, y: Float) {
         secondaryActive = true
         lastSecondary = (x, y)
         lastSecondaryUpdate = Date()
         resetPrimary()
     }
 
-    func primaryMoved(x: Float, y: Float, config: TouchpadConfig) {
+    public func primaryMoved(x: Float, y: Float, config: TouchpadConfig) {
         guard config.enabled else { return }
         guard !secondaryActive else {
             resetPrimary()
@@ -65,7 +65,7 @@ final class TouchpadMouseMapper {
         mousePoster.moveBy(dx: smoothedPrimaryDX, dy: smoothedPrimaryDY)
     }
 
-    func secondaryMoved(x: Float, y: Float, config: TouchpadConfig) {
+    public func secondaryMoved(x: Float, y: Float, config: TouchpadConfig) {
         guard config.enabled else { return }
         secondaryActive = true
         resetPrimary()

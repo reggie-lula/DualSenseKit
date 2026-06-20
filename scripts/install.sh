@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_SOURCE="$ROOT/.manual-build/DualSenseKitDemo.app"
-APP_DEST="$HOME/Applications/DualSenseKitDemo.app"
+APP_SOURCE="$ROOT/.manual-build/DualSenseKit.app"
+APP_DEST="$HOME/Applications/DualSenseKit.app"
 
 if [[ ! -d "$APP_SOURCE" ]]; then
   "$ROOT/scripts/build.sh" >/dev/null

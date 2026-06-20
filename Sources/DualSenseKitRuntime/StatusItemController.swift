@@ -2,21 +2,31 @@ import AppKit
 import Foundation
 
 @MainActor
-final class StatusItemController {
+public final class StatusItemController {
     private var statusItem: NSStatusItem?
-    var onOpenSettings: (() -> Void)?
-    var onToggleMouse: (() -> Void)?
-    var onRequestAccessibility: (() -> Void)?
-    var onQuit: (() -> Void)?
+    public var onOpenSettings: (() -> Void)?
+    public var onToggleMouse: (() -> Void)?
+    public var onRequestAccessibility: (() -> Void)?
+    public var onQuit: (() -> Void)?
 
-    func start() {
+    public init() {}
+
+    public func start() {
+        guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "DS"
         item.menu = buildMenu(connected: nil, touchpadEnabled: true, accessibilityTrusted: false)
         statusItem = item
     }
 
-    func update(connected: String?, touchpadEnabled: Bool, accessibilityTrusted: Bool) {
+    public func stop() {
+        if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+        }
+        statusItem = nil
+    }
+
+    public func update(connected: String?, touchpadEnabled: Bool, accessibilityTrusted: Bool) {
         statusItem?.button?.title = connected == nil ? "DS" : "DS●"
         statusItem?.menu = buildMenu(
             connected: connected,

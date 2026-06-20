@@ -1,19 +1,29 @@
 import Foundation
 
-final class StickMouseMapper {
+public final class StickMouseMapper {
     private let mousePoster: MousePosting
     private let deadZone: Double
     private let maxStep: Double
 
-    init(mousePoster: MousePosting = MouseEventPoster(), deadZone: Double = 0.15, maxStep: Double = 22) {
+    public init(mousePoster: MousePosting = MouseEventPoster(), deadZone: Double = 0.15, maxStep: Double = 22) {
         self.mousePoster = mousePoster
         self.deadZone = deadZone
         self.maxStep = maxStep
     }
 
     @discardableResult
-    func move(leftStickX x: Float, leftStickY y: Float, config: TouchpadConfig) -> Bool {
-        guard config.enabled else { return false }
+    public func move(leftStickX x: Float, leftStickY y: Float, config: TouchpadConfig) -> Bool {
+        move(stickX: x, stickY: y, enabled: config.leftStickMouseEnabled, config: config)
+    }
+
+    @discardableResult
+    public func move(rightStickX x: Float, rightStickY y: Float, config: TouchpadConfig) -> Bool {
+        move(stickX: x, stickY: y, enabled: config.rightStickMouseEnabled, config: config)
+    }
+
+    @discardableResult
+    private func move(stickX x: Float, stickY y: Float, enabled: Bool, config: TouchpadConfig) -> Bool {
+        guard enabled else { return false }
         let normalizedX = normalizedAxis(Double(x))
         let normalizedY = normalizedAxis(Double(y))
         guard normalizedX != 0 || normalizedY != 0 else { return false }

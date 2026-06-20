@@ -8,14 +8,16 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
+        .executable(name: "DualSenseKitApp", targets: ["DualSenseKitApp"]),
         .executable(name: "DualSenseKitDemo", targets: ["DualSenseKitDemo"]),
         .library(name: "DualSenseKit", targets: ["DualSenseKit"]),
+        .library(name: "DualSenseKitRuntime", targets: ["DualSenseKitRuntime"]),
         .library(name: "DualSenseKitDemoCore", targets: ["DualSenseKitDemoCore"])
     ],
     targets: [
         .target(name: "DualSenseKit"),
         .target(
-            name: "DualSenseKitDemoCore",
+            name: "DualSenseKitRuntime",
             dependencies: ["DualSenseKit"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -30,8 +32,34 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "DualSenseKitApp",
+            dependencies: ["DualSenseKitRuntime"]
+        ),
+        .target(
+            name: "DualSenseKitDemoCore",
+            dependencies: ["DualSenseKitRuntime"],
+            path: "Sources/demo/DualSenseKitDemoCore",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("GameController"),
+                .linkedFramework("IOKit"),
+                .linkedFramework("Network"),
+                .linkedFramework("Security")
+            ]
+        ),
+        .executableTarget(
             name: "DualSenseKitDemo",
-            dependencies: ["DualSenseKitDemoCore"]
+            dependencies: ["DualSenseKitDemoCore"],
+            path: "Sources/demo/DualSenseKitDemo"
+        ),
+        .executableTarget(
+            name: "DualSenseKitSelfTest",
+            dependencies: ["DualSenseKitRuntime"],
+            path: "Tests/SelfTest"
         )
     ]
 )

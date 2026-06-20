@@ -1,5 +1,6 @@
 import Foundation
 import DualSenseKit
+import DualSenseKitRuntime
 
 private func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
     if !condition() {
@@ -283,10 +284,14 @@ struct SelfTest {
         expect(stickPoster.moves.count == 1 && stickPoster.moves[0].0 > 0, "right stick movement should move cursor right")
         expect(stickMapper.move(leftStickX: 0, leftStickY: -1, config: touchpad), "stick y outside dead zone should move cursor")
         expect(stickPoster.moves.count == 2 && stickPoster.moves[1].1 > 0, "up stick movement should move cursor up")
-        var disabledTouchpad = touchpad
-        disabledTouchpad.enabled = false
-        expect(!stickMapper.move(leftStickX: 1, leftStickY: 0, config: disabledTouchpad), "disabled touchpad mouse config should suppress stick movement")
-        expect(stickPoster.moves.count == 2, "disabled touchpad mouse config should not post stick movement")
+        var disabledLeftStick = touchpad
+        disabledLeftStick.leftStickMouseEnabled = false
+        expect(!stickMapper.move(leftStickX: 1, leftStickY: 0, config: disabledLeftStick), "disabled left stick mouse config should suppress stick movement")
+        expect(stickPoster.moves.count == 2, "disabled left stick mouse config should not post stick movement")
+        expect(!stickMapper.move(rightStickX: 1, rightStickY: 0, config: touchpad), "right stick mouse should be off by default")
+        var enabledRightStick = touchpad
+        enabledRightStick.rightStickMouseEnabled = true
+        expect(stickMapper.move(rightStickX: 1, rightStickY: 0, config: enabledRightStick), "enabled right stick mouse should move cursor")
 
         var emitted: [ButtonGesture] = []
         let recognizer = ButtonGestureRecognizer(

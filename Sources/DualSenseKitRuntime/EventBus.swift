@@ -1,19 +1,27 @@
 import Foundation
 
-struct BridgeEvent: Codable, Equatable, Sendable {
-    var type: String
-    var payload: [String: String]
-    var timestamp: Date = Date()
+public struct BridgeEvent: Codable, Equatable, Sendable {
+    public var type: String
+    public var payload: [String: String]
+    public var timestamp: Date = Date()
+
+    public init(type: String, payload: [String: String], timestamp: Date = Date()) {
+        self.type = type
+        self.payload = payload
+        self.timestamp = timestamp
+    }
 }
 
-final class EventBus: @unchecked Sendable {
-    typealias Handler = (BridgeEvent) -> Void
+public final class EventBus: @unchecked Sendable {
+    public typealias Handler = (BridgeEvent) -> Void
     private let queue = DispatchQueue(label: "DualSenseKitDemo.EventBus")
     private var handlers: [UUID: Handler] = [:]
     private var recentEvents: [BridgeEvent] = []
     private let maxRecentEvents = 200
 
-    func publish(_ event: BridgeEvent) {
+    public init() {}
+
+    public func publish(_ event: BridgeEvent) {
         let snapshot = queue.sync {
             recentEvents.append(event)
             if recentEvents.count > maxRecentEvents {
@@ -25,17 +33,17 @@ final class EventBus: @unchecked Sendable {
     }
 
     @discardableResult
-    func subscribe(_ handler: @escaping Handler) -> UUID {
+    public func subscribe(_ handler: @escaping Handler) -> UUID {
         let id = UUID()
         queue.sync { handlers[id] = handler }
         return id
     }
 
-    func unsubscribe(_ id: UUID) {
+    public func unsubscribe(_ id: UUID) {
         queue.sync { _ = handlers.removeValue(forKey: id) }
     }
 
-    func recent(limit: Int = 50) -> [BridgeEvent] {
+    public func recent(limit: Int = 50) -> [BridgeEvent] {
         queue.sync {
             Array(recentEvents.suffix(max(0, min(limit, maxRecentEvents))))
         }

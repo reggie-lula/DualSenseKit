@@ -1,7 +1,7 @@
 import Foundation
 
-final class ButtonGestureRecognizer: @unchecked Sendable {
-    typealias Emit = (ButtonGesture) -> Void
+public final class ButtonGestureRecognizer: @unchecked Sendable {
+    public typealias Emit = (ButtonGesture) -> Void
 
     private struct ButtonState {
         var isPressed = false
@@ -14,12 +14,12 @@ final class ButtonGestureRecognizer: @unchecked Sendable {
     private let configProvider: () -> GestureTimingConfig
     private let emit: Emit
 
-    init(configProvider: @escaping () -> GestureTimingConfig, emit: @escaping Emit) {
+    public init(configProvider: @escaping () -> GestureTimingConfig, emit: @escaping Emit) {
         self.configProvider = configProvider
         self.emit = emit
     }
 
-    func update(button: ControllerButton, pressed: Bool, value: Float = 1) {
+    public func update(button: ControllerButton, pressed: Bool, value: Float = 1) {
         queue.async {
             var state = self.states[button] ?? ButtonState()
             guard state.isPressed != pressed else { return }

@@ -2,7 +2,7 @@ import Foundation
 import GameController
 import DualSenseKit
 
-final class ControllerService: @unchecked Sendable {
+public final class ControllerService: @unchecked Sendable {
     private let eventBus: EventBus
     private let configStore: ConfigStore
     private let actionExecutor: ActionExecutor
@@ -34,6 +34,9 @@ final class ControllerService: @unchecked Sendable {
     private var leftStickX: Float = 0
     private var leftStickY: Float = 0
     private var leftStickTimer: DispatchSourceTimer?
+    private var rightStickX: Float = 0
+    private var rightStickY: Float = 0
+    private var rightStickTimer: DispatchSourceTimer?
     private var primaryTouchTapStart: (date: Date, x: Float, y: Float, maxDistance: Double)?
     private lazy var recognizer = ButtonGestureRecognizer(
         configProvider: { [weak self] in self?.configStore.current.gestures ?? GestureTimingConfig() },
@@ -41,9 +44,9 @@ final class ControllerService: @unchecked Sendable {
     )
 
     private(set) var connectedController: GCController?
-    var connectedControllerName: String? { connectedController?.vendorName }
+    public var connectedControllerName: String? { connectedController?.vendorName }
 
-    func diagnostics() -> ControllerDiagnostics {
+    public func diagnostics() -> ControllerDiagnostics {
         let controller = connectedController
         return ControllerDiagnostics(
             connectedController: controller?.vendorName,
@@ -55,21 +58,21 @@ final class ControllerService: @unchecked Sendable {
         )
     }
 
-    func recentRawHIDReports(limit: Int = 20) -> [RawHIDReport] {
+    public func recentRawHIDReports(limit: Int = 20) -> [RawHIDReport] {
         hidService.recentRawReports(limit: limit)
     }
 
-    func hidAudioStatus() -> HIDAudioStatusResponse {
+    public func hidAudioStatus() -> HIDAudioStatusResponse {
         hidService.hidAudioStatus()
     }
 
-    init(eventBus: EventBus, configStore: ConfigStore, actionExecutor: ActionExecutor) {
+    public init(eventBus: EventBus, configStore: ConfigStore, actionExecutor: ActionExecutor) {
         self.eventBus = eventBus
         self.configStore = configStore
         self.actionExecutor = actionExecutor
     }
 
-    func start() {
+    public func start() {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(controllerDidConnect(_:)),
@@ -87,37 +90,38 @@ final class ControllerService: @unchecked Sendable {
         hidService.start()
     }
 
-    func stop() {
+    public func stop() {
         stopLeftStickMouseTimer()
+        stopRightStickMouseTimer()
         hidService.stop()
         GCController.stopWirelessControllerDiscovery()
         NotificationCenter.default.removeObserver(self)
     }
 
-    func setPlayerLEDs(mask: UInt8, brightness: UInt8? = nil) -> Bool {
+    public func setPlayerLEDs(mask: UInt8, brightness: UInt8? = nil) -> Bool {
         hidService.setPlayerLEDs(mask: mask, brightness: brightness)
     }
 
-    func setRumble(_ request: RumbleRequest) -> Bool {
+    public func setRumble(_ request: RumbleRequest) -> Bool {
         let heavy = request.heavy ?? request.left ?? 0
         let light = request.light ?? request.right ?? 0
         return hidService.setRumble(left: heavy, right: light, durationMs: request.durationMs)
     }
 
-    func startPoliceHeartbeatPattern(brightness: Float? = nil, intervalMs: Int = 260, durationMs: Int = 160) -> Bool {
+    public func startPoliceHeartbeatPattern(brightness: Float? = nil, intervalMs: Int = 260, durationMs: Int = 160) -> Bool {
         let safeBrightness = brightness.map { UInt8(clamping: Int(clamp01($0) * 2)) }
         return hidService.startPoliceHeartbeatPattern(brightness: safeBrightness, intervalMs: intervalMs, durationMs: durationMs)
     }
 
-    func stopEffectPattern() -> Bool {
+    public func stopEffectPattern() -> Bool {
         hidService.stopEffectPattern()
     }
 
-    func setAudioVolume(_ request: AudioVolumeRequest) -> Bool {
+    public func setAudioVolume(_ request: AudioVolumeRequest) -> Bool {
         hidService.setAudioVolume(headphone: request.headphone, speaker: request.speaker)
     }
 
-    func setHIDAudioTestTone(_ request: HIDAudioTestToneRequest) -> Bool {
+    public func setHIDAudioTestTone(_ request: HIDAudioTestToneRequest) -> Bool {
         hidService.setHIDTestTone(
             target: request.target,
             enabled: request.enabled,
@@ -125,19 +129,19 @@ final class ControllerService: @unchecked Sendable {
         )
     }
 
-    func startHIDCapture(_ request: HIDCaptureStartRequest) -> HIDCaptureResponse {
+    public func startHIDCapture(_ request: HIDCaptureStartRequest) -> HIDCaptureResponse {
         hidService.startCapture(durationMs: request.durationMs)
     }
 
-    func stopHIDCapture() -> HIDCaptureResponse {
+    public func stopHIDCapture() -> HIDCaptureResponse {
         hidService.stopCapture()
     }
 
-    func setMicMuteLED(on: Bool) -> Bool {
+    public func setMicMuteLED(on: Bool) -> Bool {
         hidService.setMicMuteLED(on: on)
     }
 
-    func setMicMuteLED(_ request: MicMuteLEDRequest) -> Bool {
+    public func setMicMuteLED(_ request: MicMuteLEDRequest) -> Bool {
         if let mode = request.mode {
             switch mode {
             case .off: return hidService.setMicMuteLED(control: 0)
@@ -148,7 +152,7 @@ final class ControllerService: @unchecked Sendable {
         return hidService.setMicMuteLED(on: request.on ?? false)
     }
 
-    func setLightbar(_ request: LightbarRequest) -> Bool {
+    public func setLightbar(_ request: LightbarRequest) -> Bool {
         let brightness = request.brightness.map { UInt8(clamping: Int(clamp01($0) * 2)) }
         return hidService.setLightbar(
             red: request.r ?? 0,
@@ -158,7 +162,7 @@ final class ControllerService: @unchecked Sendable {
         )
     }
 
-    func setTriggers(_ request: TriggerRequest) -> Bool {
+    public func setTriggers(_ request: TriggerRequest) -> Bool {
         let dualSense = connectedController?.extendedGamepad as? GCDualSenseGamepad
         var hidOK = false
         if let left = request.left {
@@ -176,7 +180,7 @@ final class ControllerService: @unchecked Sendable {
         return dualSense != nil || hidOK
     }
 
-    func resetEffects() {
+    public func resetEffects() {
         _ = hidService.setRumble(left: 0, right: 0, durationMs: nil)
         _ = hidService.setPlayerLEDs(mask: 0)
         guard let dualSense = connectedController?.extendedGamepad as? GCDualSenseGamepad else { return }
@@ -214,6 +218,7 @@ final class ControllerService: @unchecked Sendable {
             guard let self else { return }
             self.handleStandardButtons(gamepad: gamepad, changedElement: element)
             self.updateLeftStickMouse(x: gamepad.leftThumbstick.xAxis.value, y: -gamepad.leftThumbstick.yAxis.value)
+            self.updateRightStickMouse(x: gamepad.rightThumbstick.xAxis.value, y: -gamepad.rightThumbstick.yAxis.value)
         }
     }
 
@@ -308,6 +313,10 @@ final class ControllerService: @unchecked Sendable {
             updateLeftStickMouse(x: value, y: leftStickY)
         case "leftStickY":
             updateLeftStickMouse(x: leftStickX, y: value)
+        case "rightStickX":
+            updateRightStickMouse(x: value, y: rightStickY)
+        case "rightStickY":
+            updateRightStickMouse(x: rightStickX, y: value)
         default:
             break
         }
@@ -331,6 +340,16 @@ final class ControllerService: @unchecked Sendable {
         abs(x) > 0.15 || abs(y) > 0.15
     }
 
+    private func updateRightStickMouse(x: Float, y: Float) {
+        rightStickX = x
+        rightStickY = y
+        if leftStickMagnitudeExceedsDeadZone(x: x, y: y) {
+            startRightStickMouseTimer()
+        } else {
+            stopRightStickMouseTimer()
+        }
+    }
+
     private func startLeftStickMouseTimer() {
         guard leftStickTimer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: stateQueue)
@@ -352,6 +371,29 @@ final class ControllerService: @unchecked Sendable {
     private func stopLeftStickMouseTimer() {
         leftStickTimer?.cancel()
         leftStickTimer = nil
+    }
+
+    private func startRightStickMouseTimer() {
+        guard rightStickTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: stateQueue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(16))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let x = self.rightStickX
+            let y = self.rightStickY
+            guard self.leftStickMagnitudeExceedsDeadZone(x: x, y: y) else {
+                self.stopRightStickMouseTimer()
+                return
+            }
+            _ = self.stickMouseMapper.move(rightStickX: x, rightStickY: y, config: self.configStore.current.touchpad)
+        }
+        rightStickTimer = timer
+        timer.resume()
+    }
+
+    private func stopRightStickMouseTimer() {
+        rightStickTimer?.cancel()
+        rightStickTimer = nil
     }
 
     private func handleHIDTouch(name: String, x: Float, y: Float, active: Bool) {

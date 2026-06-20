@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-scripts/build.sh
+scripts/build.sh --demo
 pkill -f './.manual-build/DualSenseKitDemo --headless-server' || true
-ls ./
 ./.manual-build/DualSenseKitDemo --headless-server

@@ -1,13 +1,13 @@
 import Foundation
 
-final class ConfigStore: @unchecked Sendable {
+public final class ConfigStore: @unchecked Sendable {
     private let queue = DispatchQueue(label: "DualSenseKitDemo.ConfigStore")
     private let encoder: JSONEncoder
     private let decoder = JSONDecoder()
-    private(set) var current = BridgeConfig()
-    let configURL: URL
+    public private(set) var current = BridgeConfig()
+    public let configURL: URL
 
-    init(configURL: URL? = nil) {
+    public init(configURL: URL? = nil) {
         let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/DualSenseKitDemo", isDirectory: true)
         self.configURL = configURL ?? supportDirectory.appendingPathComponent("config.json")
@@ -16,7 +16,7 @@ final class ConfigStore: @unchecked Sendable {
     }
 
     @discardableResult
-    func load() -> BridgeConfig {
+    public func load() -> BridgeConfig {
         queue.sync {
             guard FileManager.default.fileExists(atPath: configURL.path) else {
                 current = BridgeConfig()
@@ -35,7 +35,7 @@ final class ConfigStore: @unchecked Sendable {
         }
     }
 
-    func save(_ config: BridgeConfig) {
+    public func save(_ config: BridgeConfig) {
         queue.sync {
             current = config
             persist(config)

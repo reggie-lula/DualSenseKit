@@ -1,6 +1,6 @@
 import Foundation
 
-enum DiagnosticsLog {
+public enum DiagnosticsLog {
     private static let queue = DispatchQueue(label: "DualSenseKitDemo.DiagnosticsLog")
 
     static var logURL: URL {
@@ -9,7 +9,7 @@ enum DiagnosticsLog {
             .appendingPathComponent("diagnostics.log")
     }
 
-    static func write(_ message: String) {
+    public static func write(_ message: String) {
         queue.async {
             let timestamp = ISO8601DateFormatter().string(from: Date())
             let line = "\(timestamp) \(message)\n"

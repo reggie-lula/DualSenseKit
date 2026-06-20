@@ -2,12 +2,12 @@ import Foundation
 import IOKit.hid
 import DualSenseKit
 
-final class DualSenseHIDService: @unchecked Sendable {
-    typealias ButtonUpdate = (ControllerButton, Bool, Float) -> Void
-    typealias AxisUpdate = (String, Float) -> Void
-    typealias TouchUpdate = (String, Float, Float, Bool) -> Void
-    typealias MotionUpdate = (DualSenseMotion) -> Void
-    typealias OutputEvent = (BridgeEvent) -> Void
+public final class DualSenseHIDService: @unchecked Sendable {
+    public typealias ButtonUpdate = (ControllerButton, Bool, Float) -> Void
+    public typealias AxisUpdate = (String, Float) -> Void
+    public typealias TouchUpdate = (String, Float, Float, Bool) -> Void
+    public typealias MotionUpdate = (DualSenseMotion) -> Void
+    public typealias OutputEvent = (BridgeEvent) -> Void
 
     private let queue = DispatchQueue(label: "DualSenseKitDemo.DualSenseHIDService")
     private var manager: IOHIDManager?
@@ -42,7 +42,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     private var captureReports: [RawHIDReport] = []
     private var captureStopWorkItem: DispatchWorkItem?
 
-    init(
+    public init(
         buttonUpdate: @escaping ButtonUpdate,
         axisUpdate: @escaping AxisUpdate,
         touchUpdate: @escaping TouchUpdate,
@@ -60,7 +60,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         stop()
     }
 
-    func start() {
+    public func start() {
         var matchedDevice: IOHIDDevice?
         queue.sync {
             guard manager == nil else { return }
@@ -85,7 +85,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         }
     }
 
-    func stop() {
+    public func stop() {
         queue.sync {
             if let device {
                 IOHIDDeviceUnscheduleFromRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
@@ -116,7 +116,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         }
     }
 
-    func diagnostics() -> HIDDiagnostics {
+    public func diagnostics() -> HIDDiagnostics {
         queue.sync {
             HIDDiagnostics(
                 connected: device != nil,
@@ -130,13 +130,13 @@ final class DualSenseHIDService: @unchecked Sendable {
         }
     }
 
-    func recentRawReports(limit: Int = 20) -> [RawHIDReport] {
+    public func recentRawReports(limit: Int = 20) -> [RawHIDReport] {
         queue.sync {
             Array(rawReports.suffix(max(0, min(limit, maxRawReports))))
         }
     }
 
-    func hidAudioStatus() -> HIDAudioStatusResponse {
+    public func hidAudioStatus() -> HIDAudioStatusResponse {
         queue.sync {
             let diagnostics = HIDDiagnostics(
                 connected: device != nil,
@@ -165,7 +165,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func setPlayerLEDs(mask: UInt8, brightness: UInt8? = nil) -> Bool {
+    public func setPlayerLEDs(mask: UInt8, brightness: UInt8? = nil) -> Bool {
         let safeMask = mask & 0x1f
         let safeBrightness = brightness.map { min($0, 2) }
         return queue.sync {
@@ -188,7 +188,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func setRumble(left: Float, right: Float, durationMs: Int?) -> Bool {
+    public func setRumble(left: Float, right: Float, durationMs: Int?) -> Bool {
         let safeLeft = UInt8(clamping: Int(clamp01(left) * 255))
         let safeRight = UInt8(clamping: Int(clamp01(right) * 255))
         let safeDuration = max(0, min(durationMs ?? 0, 5000))
@@ -220,7 +220,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func startPoliceHeartbeatPattern(brightness: UInt8? = nil, intervalMs: Int = 260, durationMs: Int = 160) -> Bool {
+    public func startPoliceHeartbeatPattern(brightness: UInt8? = nil, intervalMs: Int = 260, durationMs: Int = 160) -> Bool {
         queue.sync {
             guard device != nil, isOpen else {
                 statusText = "hid_not_open"
@@ -246,7 +246,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func stopEffectPattern() -> Bool {
+    public func stopEffectPattern() -> Bool {
         queue.sync {
             cancelEffectPatternLocked()
             guard let device, isOpen else {
@@ -265,7 +265,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func setAudioVolume(headphone: Float?, speaker: Float?) -> Bool {
+    public func setAudioVolume(headphone: Float?, speaker: Float?) -> Bool {
         let safeHeadphone = headphone.map { UInt8(clamping: Int(clamp01($0) * 255)) }
         let safeSpeaker = speaker.map { UInt8(clamping: Int(clamp01($0) * 255)) }
         return queue.sync {
@@ -282,7 +282,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func setHIDTestTone(target: HIDAudioTarget, enabled: Bool, durationMs: Int?) -> Bool {
+    public func setHIDTestTone(target: HIDAudioTarget, enabled: Bool, durationMs: Int?) -> Bool {
         let safeDuration = max(0, min(durationMs ?? 0, 10_000))
         let sdkTarget: DualSenseAudioOutputTarget = target == .speaker ? .speaker : .headphone
         let ok = queue.sync {
@@ -321,7 +321,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         return ok
     }
 
-    func startCapture(durationMs: Int?) -> HIDCaptureResponse {
+    public func startCapture(durationMs: Int?) -> HIDCaptureResponse {
         let safeDuration = max(0, min(durationMs ?? 0, 30_000))
         let response = queue.sync {
             captureStopWorkItem?.cancel()
@@ -344,7 +344,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         return response
     }
 
-    func stopCapture() -> HIDCaptureResponse {
+    public func stopCapture() -> HIDCaptureResponse {
         queue.sync {
             captureStopWorkItem?.cancel()
             captureStopWorkItem = nil
@@ -357,12 +357,12 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func setMicMuteLED(on: Bool) -> Bool {
+    public func setMicMuteLED(on: Bool) -> Bool {
         setMicMuteLED(control: on ? 1 : 0)
     }
 
     @discardableResult
-    func setMicMuteLED(control: UInt8) -> Bool {
+    public func setMicMuteLED(control: UInt8) -> Bool {
         let safeControl = min(control, 2)
         return queue.sync {
             guard let device, isOpen else {
@@ -378,7 +378,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func setLightbar(red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?) -> Bool {
+    public func setLightbar(red: UInt8, green: UInt8, blue: UInt8, brightness: UInt8?) -> Bool {
         queue.sync {
             cancelEffectPatternLocked()
             guard let device, isOpen else {
@@ -466,7 +466,7 @@ final class DualSenseHIDService: @unchecked Sendable {
     }
 
     @discardableResult
-    func setAdaptiveTrigger(side: DualSenseTriggerSide, mode: UInt8, params: [UInt8]) -> Bool {
+    public func setAdaptiveTrigger(side: DualSenseTriggerSide, mode: UInt8, params: [UInt8]) -> Bool {
         queue.sync {
             guard let device, isOpen else {
                 statusText = "hid_not_open"
@@ -480,11 +480,11 @@ final class DualSenseHIDService: @unchecked Sendable {
         }
     }
 
-    static func parseSpecialButtons(report: Data) -> UInt8? {
+    public static func parseSpecialButtons(report: Data) -> UInt8? {
         DualSenseProtocol.specialButtonsByte(from: report)
     }
 
-    static func parseAudioStatus(report: Data) -> DualSenseAudioStatus? {
+    public static func parseAudioStatus(report: Data) -> DualSenseAudioStatus? {
         DualSenseProtocol.parseAudioStatus(from: report)
     }
 
@@ -492,7 +492,7 @@ final class DualSenseHIDService: @unchecked Sendable {
         DualSenseProtocol.parseInputReport(report)
     }
 
-    static func pressedSpecialButtons(from value: UInt8) -> [(ControllerButton, Bool)] {
+    public static func pressedSpecialButtons(from value: UInt8) -> [(ControllerButton, Bool)] {
         [
             (.buttonHome, (value & 0x01) != 0),
             (.touchpadButton, (value & 0x02) != 0),
@@ -500,15 +500,15 @@ final class DualSenseHIDService: @unchecked Sendable {
         ]
     }
 
-    static func hatButtons(_ hat: UInt8) -> Set<ControllerButton> {
+    public static func hatButtons(_ hat: UInt8) -> Set<ControllerButton> {
         Set(DualSenseProtocol.dpadButtons(from: hat).compactMap(Self.controllerButton))
     }
 
-    static func bluetoothOutputReport(playerLEDMask: UInt8, sequence: UInt8 = 0) -> Data {
+    public static func bluetoothOutputReport(playerLEDMask: UInt8, sequence: UInt8 = 0) -> Data {
         bluetoothOutputReport(effect: .playerLEDs(mask: playerLEDMask, brightness: nil), sequence: sequence)
     }
 
-    static func bluetoothOutputReport(leftMotor: UInt8, rightMotor: UInt8, sequence: UInt8 = 0) -> Data {
+    public static func bluetoothOutputReport(leftMotor: UInt8, rightMotor: UInt8, sequence: UInt8 = 0) -> Data {
         bluetoothOutputReport(effect: .rumble(leftMotor: leftMotor, rightMotor: rightMotor), sequence: sequence)
     }
 
@@ -974,7 +974,7 @@ private enum HIDOutputEffect {
         rumble: (leftMotor: UInt8, rightMotor: UInt8)?
     )
 
-    var intentName: String {
+    public var intentName: String {
         switch self {
         case .playerLEDs: return "playerLEDs"
         case .rumble: return "rumble"

@@ -1,22 +1,22 @@
 import Foundation
 import Security
 
-final class TokenService: @unchecked Sendable {
+public final class TokenService: @unchecked Sendable {
     private let service = "DualSenseKitDemo"
     private let account = "LocalAPIToken"
     private let tokenFileURL: URL
 
-    init(tokenFileURL: URL? = nil) {
+    public init(tokenFileURL: URL? = nil) {
         let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/DualSenseKitDemo", isDirectory: true)
         self.tokenFileURL = tokenFileURL ?? supportDirectory.appendingPathComponent("api-token")
     }
 
-    var tokenFilePath: String {
+    public var tokenFilePath: String {
         tokenFileURL.path
     }
 
-    func token() -> String {
+    public func token() -> String {
         if let fileToken = readTokenFile() {
             mirrorKeychain(fileToken)
             return fileToken
@@ -31,11 +31,11 @@ final class TokenService: @unchecked Sendable {
         return token
     }
 
-    func isAuthorized(headers: [String: String]) -> Bool {
+    public func isAuthorized(headers: [String: String]) -> Bool {
         Self.isAuthorized(headers: headers, expectedToken: token())
     }
 
-    static func isAuthorized(headers: [String: String], expectedToken: String) -> Bool {
+    public static func isAuthorized(headers: [String: String], expectedToken: String) -> Bool {
         let expected = expectedToken
         if headers["x-dualsensebridge-token"] == expected {
             return true

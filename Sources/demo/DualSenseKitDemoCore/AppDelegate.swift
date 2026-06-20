@@ -1,4 +1,5 @@
 import AppKit
+import DualSenseKitRuntime
 
 @MainActor
 private var retainedAppDelegate: AppDelegate?

@@ -4,14 +4,14 @@
 <dict>
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
-  <key>CFBundleExecutable</key>
-  <string>DualSenseKitDemo</string>
-  <key>CFBundleIdentifier</key>
-  <string>local.dualsensebridge.app</string>
+	<key>CFBundleExecutable</key>
+	<string>DualSenseKit</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.dualsensekit.app</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
-  <key>CFBundleName</key>
-  <string>DualSenseKitDemo</string>
+	<key>CFBundleName</key>
+	<string>DualSenseKit</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
