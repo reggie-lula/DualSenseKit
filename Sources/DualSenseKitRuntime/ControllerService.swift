@@ -6,6 +6,7 @@ public final class ControllerService: @unchecked Sendable {
     private let eventBus: EventBus
     private let configStore: ConfigStore
     private let actionExecutor: ActionExecutor
+    private let mappingsProvider: (@Sendable () -> [ButtonGesture: [Action]])?
     private let touchpadMapper = TouchpadMouseMapper()
     private let stickMouseMapper = StickMouseMapper()
     private let stateQueue = DispatchQueue(label: "DualSenseKitDemo.ControllerState")
@@ -62,14 +63,24 @@ public final class ControllerService: @unchecked Sendable {
         hidService.recentRawReports(limit: limit)
     }
 
+    public func setOutputSource(_ source: String?) {
+        hidService.setOutputSource(source)
+    }
+
     public func hidAudioStatus() -> HIDAudioStatusResponse {
         hidService.hidAudioStatus()
     }
 
-    public init(eventBus: EventBus, configStore: ConfigStore, actionExecutor: ActionExecutor) {
+    public init(
+        eventBus: EventBus,
+        configStore: ConfigStore,
+        actionExecutor: ActionExecutor,
+        mappingsProvider: (@Sendable () -> [ButtonGesture: [Action]])? = nil
+    ) {
         self.eventBus = eventBus
         self.configStore = configStore
         self.actionExecutor = actionExecutor
+        self.mappingsProvider = mappingsProvider
     }
 
     public func start() {
@@ -85,14 +96,15 @@ public final class ControllerService: @unchecked Sendable {
             name: .GCControllerDidDisconnect,
             object: nil
         )
+        hidService.start()
         GCController.startWirelessControllerDiscovery(completionHandler: nil)
         GCController.controllers().forEach { attach($0) }
-        hidService.start()
     }
 
     public func stop() {
         stopLeftStickMouseTimer()
         stopRightStickMouseTimer()
+        actionExecutor.releaseAllHeld(config: configStore.current)
         hidService.stop()
         GCController.stopWirelessControllerDiscovery()
         NotificationCenter.default.removeObserver(self)
@@ -197,7 +209,12 @@ public final class ControllerService: @unchecked Sendable {
         guard let controller = notification.object as? GCController else { return }
         if controller === connectedController {
             connectedController = nil
+            hidService.setControllerContext(name: nil)
             stopLeftStickMouseTimer()
+            actionExecutor.releaseAllHeld(config: configStore.current)
+            DiagnosticsLog.write(event: "controller.disconnected", [
+                "appMs": "\(DiagnosticsLog.millisecondsSinceAppStart())"
+            ])
             eventBus.publish(BridgeEvent(type: "controller.disconnected", payload: [:]))
         }
     }
@@ -205,6 +222,11 @@ public final class ControllerService: @unchecked Sendable {
     private func attach(_ controller: GCController) {
         guard controller.extendedGamepad != nil else { return }
         connectedController = controller
+        hidService.setControllerContext(name: controller.vendorName)
+        DiagnosticsLog.write(event: "controller.connected", [
+            "appMs": "\(DiagnosticsLog.millisecondsSinceAppStart())",
+            "name": controller.vendorName ?? "Unknown Controller"
+        ])
         eventBus.publish(BridgeEvent(type: "controller.connected", payload: [
             "name": controller.vendorName ?? "Unknown Controller"
         ]))
@@ -302,8 +324,21 @@ public final class ControllerService: @unchecked Sendable {
             "button": gesture.button.rawValue
         ]))
         let config = configStore.current
-        if let actions = config.mappings[gesture] {
-            actionExecutor.execute(actions, config: config)
+        let mappings = mappingsProvider?() ?? config.mappings
+        switch gesture.kind {
+        case .press:
+            if let actions = mappings[gesture] {
+                actionExecutor.beginActions(actions, for: gesture.button, config: config)
+            }
+        case .release:
+            actionExecutor.endActions(for: gesture.button, config: config)
+            if let actions = mappings[gesture] {
+                actionExecutor.execute(actions, config: config)
+            }
+        default:
+            if let actions = mappings[gesture] {
+                actionExecutor.execute(actions, config: config)
+            }
         }
     }
 

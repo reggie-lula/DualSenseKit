@@ -5,17 +5,20 @@ import Foundation
 @MainActor
 final class FormalAppCoordinator {
     private let configStore = ConfigStore()
+    private let profileStore = ProfileStore()
     private let eventBus = EventBus()
     private let permissionService = PermissionService()
     private let statusItem = StatusItemController()
     private let appMenu = AppMenuController()
     private let hookStore = HookStore()
     private var eventSubscription: UUID?
+    private var workspaceObserver: NSObjectProtocol?
     private lazy var actionExecutor = ActionExecutor(permissionService: permissionService)
     private lazy var controllerService = ControllerService(
         eventBus: eventBus,
         configStore: configStore,
-        actionExecutor: actionExecutor
+        actionExecutor: actionExecutor,
+        mappingsProvider: { [profileStore] in profileStore.activeMappings }
     )
     private lazy var lightService = LightService(controllerService: controllerService)
     private lazy var hookService = HookService(
@@ -28,6 +31,7 @@ final class FormalAppCoordinator {
     )
     private lazy var windowController = MainWindowController(
         configStore: configStore,
+        profileStore: profileStore,
         hookStore: hookStore,
         hookService: hookService,
         preferences: AppPreferences.shared,
@@ -37,12 +41,22 @@ final class FormalAppCoordinator {
     func start() {
         _ = configStore.load()
         _ = hookStore.load()
-        controllerService.start()
-        controllerService.resetEffects()
-        hookHTTPServer.start()
+        profileStore.loadOrSeed(from: configStore.current.mappings)
+        profileStore.activate(bundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+        workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            self?.profileStore.activate(bundleIdentifier: app?.bundleIdentifier)
+        }
         configureMainMenu()
         configureStatusItem()
         subscribeStatusEvents()
+        controllerService.start()
+        controllerService.resetEffects()
+        hookHTTPServer.start()
         applyPreferences()
         windowController.showWindow(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -51,6 +65,9 @@ final class FormalAppCoordinator {
     func stop() {
         if let eventSubscription {
             eventBus.unsubscribe(eventSubscription)
+        }
+        if let workspaceObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
         }
         hookHTTPServer.stop()
         hookService.stop()
@@ -68,6 +85,13 @@ final class FormalAppCoordinator {
         statusItem.onToggleMouse = { [weak self] in self?.toggleTouchpadMouse() }
         statusItem.onRequestAccessibility = { [weak self] in
             _ = self?.permissionService.requestAccessibilityTrust()
+        }
+        statusItem.onOpenDiagnosticsLog = {
+            NSWorkspace.shared.open(DiagnosticsLog.logURL)
+        }
+        statusItem.onCopyDiagnosticsLogPath = {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(DiagnosticsLog.logURL.path, forType: .string)
         }
         statusItem.onQuit = { NSApplication.shared.terminate(nil) }
     }

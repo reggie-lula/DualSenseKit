@@ -10,12 +10,17 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     private let configStore: ConfigStore
+    private let profileStore: ProfileStore
     private let hookStore: HookStore
     private let hookService: HookService
     private let preferences: AppPreferences
     private let onPreferencesChanged: () -> Void
 
     private var config: BridgeConfig
+    private var editingProfile: MappingProfile = MappingProfile(name: "默认", mappings: [:])
+    private var editingProfileID: UUID?
+    private var slotViews: [ControllerButton: ButtonSlotView] = [:]
+    private var activePopover: NSPopover?
     private var hooks: [HookDefinition]
     private var currentPage: Page = .mapping
     private var selectedButton: ControllerButton = .dpadRight
@@ -34,6 +39,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     private let launchCheck = NSButton(checkboxWithTitle: "开机自启", target: nil, action: nil)
     private let dockCheck = NSButton(checkboxWithTitle: "Dock 图标", target: nil, action: nil)
     private let statusCheck = NSButton(checkboxWithTitle: "状态栏图标", target: nil, action: nil)
+    private let profilePopup = NSPopUpButton(frame: .zero, pullsDown: false)
 
     private let previewView = ControllerPreviewView()
     private let selectedTitle = NSTextField(labelWithString: "")
@@ -74,12 +80,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     init(
         configStore: ConfigStore,
+        profileStore: ProfileStore,
         hookStore: HookStore,
         hookService: HookService,
         preferences: AppPreferences,
         onPreferencesChanged: @escaping () -> Void
     ) {
         self.configStore = configStore
+        self.profileStore = profileStore
         self.hookStore = hookStore
         self.hookService = hookService
         self.preferences = preferences
@@ -87,13 +95,14 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         self.config = configStore.current
         self.hooks = hookStore.hooks
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1080, height: 660),
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 700),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "DualSenseKit"
-        window.minSize = NSSize(width: 920, height: 560)
+        window.title = "DualSense Bridge"
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.minSize = NSSize(width: 920, height: 580)
         super.init(window: window)
         buildContent()
         reloadFromStore()
@@ -106,7 +115,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     func reloadFromStore() {
         config = configStore.current
         hooks = hookStore.load()
-        selectedButton = config.mappings.keys.first?.button ?? .dpadRight
+        let stored = profileStore.profiles.first(where: { $0.id == editingProfileID })
+            ?? profileStore.defaultProfile()
+        editingProfileID = stored.id
+        editingProfile = stored
+        selectedButton = editingProfile.mappings.keys.first?.button ?? .dpadRight
         previewView.selectedButton = selectedButton
         hookTable.reloadData()
         if hookTable.selectedRow < 0 && !hooks.isEmpty {
@@ -120,22 +133,31 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     private func buildContent() {
         guard let window else { return }
+        let sidebarBg = NSColor(calibratedRed: 0.062, green: 0.078, blue: 0.114, alpha: 1)
+        let contentBg = NSColor(calibratedRed: 0.090, green: 0.108, blue: 0.152, alpha: 1)
+
         let root = NSView()
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor.white.cgColor
+        root.layer?.backgroundColor = contentBg.cgColor
         root.translatesAutoresizingMaskIntoConstraints = false
 
         sidebar.translatesAutoresizingMaskIntoConstraints = false
         sidebar.wantsLayer = true
-        sidebar.layer?.backgroundColor = NSColor(calibratedRed: 0.94, green: 0.95, blue: 0.97, alpha: 1).cgColor
+        sidebar.layer?.backgroundColor = sidebarBg.cgColor
         let sidebarContent = buildSidebar()
         sidebar.addSubview(sidebarContent)
 
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.wantsLayer = true
-        contentContainer.layer?.backgroundColor = NSColor.white.cgColor
+        contentContainer.layer?.backgroundColor = contentBg.cgColor
+
+        let sep = NSView()
+        sep.wantsLayer = true
+        sep.layer?.backgroundColor = NSColor(white: 1, alpha: 0.06).cgColor
+        sep.translatesAutoresizingMaskIntoConstraints = false
 
         root.addSubview(sidebar)
+        root.addSubview(sep)
         root.addSubview(contentContainer)
         window.contentView = root
         NSLayoutConstraint.activate([
@@ -146,8 +168,12 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: root.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 280),
-            contentContainer.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            sidebar.widthAnchor.constraint(equalToConstant: 256),
+            sep.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            sep.topAnchor.constraint(equalTo: root.topAnchor),
+            sep.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            sep.widthAnchor.constraint(equalToConstant: 1),
+            contentContainer.leadingAnchor.constraint(equalTo: sep.trailingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             contentContainer.topAnchor.constraint(equalTo: root.topAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: root.bottomAnchor)
@@ -155,46 +181,146 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     private func buildSidebar() -> NSView {
-        let root = NSStackView()
-        root.orientation = .vertical
-        root.alignment = .leading
-        root.spacing = 18
-        root.edgeInsets = NSEdgeInsets(top: 28, left: 24, bottom: 24, right: 18)
-        root.translatesAutoresizingMaskIntoConstraints = false
+        let cardBg = NSColor(calibratedRed: 0.10, green: 0.13, blue: 0.19, alpha: 1)
+        let accentBlue = NSColor(calibratedRed: 0.22, green: 0.52, blue: 0.95, alpha: 1)
+        let W: CGFloat = 222
 
-        let mark = NSTextField(labelWithString: "logo")
-        mark.alignment = .center
-        mark.font = .systemFont(ofSize: 15, weight: .semibold)
-        mark.textColor = .labelColor
-        mark.wantsLayer = true
-        mark.layer?.backgroundColor = NSColor(calibratedRed: 0.86, green: 0.89, blue: 0.92, alpha: 1).cgColor
-        mark.layer?.cornerRadius = 24
-        mark.widthAnchor.constraint(equalToConstant: 48).isActive = true
-        mark.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        stack.edgeInsets = NSEdgeInsets(top: 22, left: 17, bottom: 22, right: 17)
+        stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSTextField(labelWithString: "DSKit")
-        title.font = .systemFont(ofSize: 20, weight: .bold)
-        title.textColor = .labelColor
+        // --- Brand row ---
+        let iconView = NSImageView()
+        let iconCfg = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+        iconView.image = NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: nil)
+        iconView.symbolConfiguration = iconCfg
+        iconView.contentTintColor = accentBlue
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        iconView.heightAnchor.constraint(equalToConstant: 22).isActive = true
 
-        let brandRow = row([mark, NSView(), title])
-        brandRow.widthAnchor.constraint(equalToConstant: 230).isActive = true
+        let appTitle = NSTextField(labelWithString: "DualSense Bridge")
+        appTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        appTitle.textColor = .white
 
+        let brandStack = NSStackView(views: [iconView, appTitle])
+        brandStack.orientation = .horizontal
+        brandStack.alignment = .centerY
+        brandStack.spacing = 8
+        brandStack.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(brandStack)
+        stack.setCustomSpacing(18, after: brandStack)
+
+        // --- Device card ---
+        let deviceSectionLabel = sidebarSectionHeader("DEVICE")
+        stack.addArrangedSubview(deviceSectionLabel)
+        stack.setCustomSpacing(8, after: deviceSectionLabel)
+
+        let deviceCard = NSView()
+        deviceCard.wantsLayer = true
+        deviceCard.layer?.backgroundColor = cardBg.cgColor
+        deviceCard.layer?.cornerRadius = 10
+        deviceCard.translatesAutoresizingMaskIntoConstraints = false
+        deviceCard.widthAnchor.constraint(equalToConstant: W).isActive = true
+
+        let deviceName = NSTextField(labelWithString: "DualSense")
+        deviceName.font = .systemFont(ofSize: 13, weight: .semibold)
+        deviceName.textColor = .white
+        deviceName.lineBreakMode = .byTruncatingTail
+
+        let dotView = NSView()
+        dotView.wantsLayer = true
+        dotView.layer?.backgroundColor = NSColor(calibratedRed: 0.15, green: 0.85, blue: 0.42, alpha: 1).cgColor
+        dotView.layer?.cornerRadius = 4
+        dotView.translatesAutoresizingMaskIntoConstraints = false
+        dotView.widthAnchor.constraint(equalToConstant: 8).isActive = true
+        dotView.heightAnchor.constraint(equalToConstant: 8).isActive = true
+
+        let connectedLabel = NSTextField(labelWithString: "Connected")
+        connectedLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        connectedLabel.textColor = NSColor(calibratedRed: 0.15, green: 0.85, blue: 0.42, alpha: 1)
+
+        let connectedRow = NSStackView(views: [dotView, connectedLabel])
+        connectedRow.orientation = .horizontal
+        connectedRow.alignment = .centerY
+        connectedRow.spacing = 5
+
+        let controllerThumb = NSImageView()
+        if let url = Bundle.module.url(forResource: "dualsense-controller", withExtension: "svg"),
+           let img = NSImage(contentsOf: url) {
+            controllerThumb.image = img
+        } else {
+            let bigIconCfg = NSImage.SymbolConfiguration(pointSize: 36, weight: .thin)
+            controllerThumb.image = NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: nil)
+            controllerThumb.symbolConfiguration = bigIconCfg
+            controllerThumb.contentTintColor = NSColor(white: 0.30, alpha: 1)
+        }
+        controllerThumb.imageScaling = .scaleProportionallyDown
+        controllerThumb.translatesAutoresizingMaskIntoConstraints = false
+        controllerThumb.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        controllerThumb.heightAnchor.constraint(equalToConstant: 44).isActive = true
+
+        let infoStack = NSStackView()
+        infoStack.orientation = .vertical
+        infoStack.alignment = .leading
+        infoStack.spacing = 5
+        infoStack.translatesAutoresizingMaskIntoConstraints = false
+        infoStack.addArrangedSubview(deviceName)
+        infoStack.addArrangedSubview(connectedRow)
+
+        let cardContent = NSStackView(views: [infoStack, controllerThumb])
+        cardContent.orientation = .horizontal
+        cardContent.alignment = .centerY
+        cardContent.spacing = 8
+        cardContent.translatesAutoresizingMaskIntoConstraints = false
+
+        deviceCard.addSubview(cardContent)
+        NSLayoutConstraint.activate([
+            cardContent.leadingAnchor.constraint(equalTo: deviceCard.leadingAnchor, constant: 12),
+            cardContent.trailingAnchor.constraint(equalTo: deviceCard.trailingAnchor, constant: -12),
+            cardContent.topAnchor.constraint(equalTo: deviceCard.topAnchor, constant: 12),
+            cardContent.bottomAnchor.constraint(equalTo: deviceCard.bottomAnchor, constant: -12)
+        ])
+
+        stack.addArrangedSubview(deviceCard)
+        stack.setCustomSpacing(20, after: deviceCard)
+
+        // --- Controls navigation ---
+        let controlsSectionLabel = sidebarSectionHeader("CONTROLS")
+        stack.addArrangedSubview(controlsSectionLabel)
+        stack.setCustomSpacing(4, after: controlsSectionLabel)
+
+        styleDarkNavButton(mappingNavButton, title: "按键映射", symbolName: "arrow.left.arrow.right", width: W)
+        styleDarkNavButton(hooksNavButton, title: "Hook 配置", symbolName: "link", width: W)
         mappingNavButton.target = self
         mappingNavButton.action = #selector(showMappingPage)
         hooksNavButton.target = self
         hooksNavButton.action = #selector(showHooksPage)
+        stack.addArrangedSubview(mappingNavButton)
+        stack.setCustomSpacing(2, after: mappingNavButton)
+        stack.addArrangedSubview(hooksNavButton)
+
+        let flexSpacer = NSView()
+        flexSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        flexSpacer.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(flexSpacer)
+
+        let sepLine = NSView()
+        sepLine.wantsLayer = true
+        sepLine.layer?.backgroundColor = NSColor(white: 1, alpha: 0.07).cgColor
+        sepLine.translatesAutoresizingMaskIntoConstraints = false
+        sepLine.widthAnchor.constraint(equalToConstant: W).isActive = true
+        sepLine.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        stack.addArrangedSubview(sepLine)
+        stack.setCustomSpacing(6, after: sepLine)
+
+        styleDarkNavButton(settingsNavButton, title: "设置", symbolName: "gear", width: W)
         settingsNavButton.target = self
         settingsNavButton.action = #selector(showSettingsPage)
-        [mappingNavButton, hooksNavButton, settingsNavButton].forEach {
-            $0.isBordered = false
-            $0.alignment = .left
-            $0.font = .systemFont(ofSize: 18, weight: .semibold)
-            $0.contentTintColor = .labelColor
-            $0.wantsLayer = true
-            $0.layer?.cornerRadius = 8
-            $0.widthAnchor.constraint(equalToConstant: 226).isActive = true
-            $0.heightAnchor.constraint(equalToConstant: 42).isActive = true
-        }
+        stack.addArrangedSubview(settingsNavButton)
 
         [launchCheck, dockCheck, statusCheck].forEach {
             $0.target = self
@@ -203,25 +329,41 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             $0.contentTintColor = .labelColor
         }
 
-        root.addArrangedSubview(brandRow)
-        root.addArrangedSubview(spacer(height: 18))
-        root.addArrangedSubview(mappingNavButton)
-        root.addArrangedSubview(hooksNavButton)
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-        root.addArrangedSubview(spacer)
-        root.addArrangedSubview(settingsNavButton)
-
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(root)
+        container.addSubview(stack)
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            root.topAnchor.constraint(equalTo: container.topAnchor),
-            root.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: container.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
         return container
+    }
+
+    private func sidebarSectionHeader(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 10, weight: .semibold)
+        label.textColor = NSColor(white: 0.40, alpha: 1)
+        return label
+    }
+
+    private func styleDarkNavButton(_ button: NSButton, title: String, symbolName: String, width: CGFloat) {
+        button.title = "  \(title)"
+        let imgCfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?.withSymbolConfiguration(imgCfg)
+        button.imagePosition = .imageLeft
+        button.imageHugsTitle = true
+        button.alignment = .left
+        button.isBordered = false
+        button.font = .systemFont(ofSize: 13, weight: .medium)
+        button.contentTintColor = NSColor(white: 0.65, alpha: 1)
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 7
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.constraints.filter { $0.firstAttribute == .width || $0.firstAttribute == .height }.forEach { $0.isActive = false }
+        button.widthAnchor.constraint(equalToConstant: width).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 36).isActive = true
     }
 
     @objc private func showMappingPage() {
@@ -267,112 +409,335 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     private func styleSidebarSelection() {
+        let selectedBg = NSColor(calibratedRed: 0.14, green: 0.20, blue: 0.32, alpha: 1)
+        let selectedTint = NSColor.white
+        let normalTint = NSColor(white: 0.62, alpha: 1)
         [(mappingNavButton, Page.mapping), (hooksNavButton, Page.hooks), (settingsNavButton, Page.settings)].forEach { button, page in
-            button.layer?.backgroundColor = currentPage == page
-                ? NSColor(calibratedRed: 0.88, green: 0.90, blue: 0.93, alpha: 1).cgColor
-                : NSColor.clear.cgColor
+            button.layer?.backgroundColor = currentPage == page ? selectedBg.cgColor : NSColor.clear.cgColor
+            button.contentTintColor = currentPage == page ? selectedTint : normalTint
         }
     }
 
     private func buildMappingPage() -> NSView {
+        slotViews = [:]
+        activePopover?.close()
+        activePopover = nil
+
         let root = NSView()
         root.translatesAutoresizingMaskIntoConstraints = false
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor.white.cgColor
+        root.layer?.backgroundColor = NSColor(calibratedRed: 0.090, green: 0.108, blue: 0.152, alpha: 1).cgColor
 
-        let previewContainer = NSView()
-        previewContainer.translatesAutoresizingMaskIntoConstraints = false
-        previewContainer.wantsLayer = true
-        previewContainer.layer?.backgroundColor = NSColor(calibratedWhite: 0.985, alpha: 1).cgColor
-        previewView.translatesAutoresizingMaskIntoConstraints = false
-        previewView.onSelectButton = { [weak self] button in self?.select(button) }
-        previewContainer.addSubview(previewView)
+        // Header
+        let titleLabel = NSTextField(labelWithString: "Button Remapping")
+        titleLabel.font = .systemFont(ofSize: 20, weight: .bold)
+        titleLabel.textColor = .white
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let inspector = buildMappingInspector()
-        inspector.translatesAutoresizingMaskIntoConstraints = false
-        inspector.wantsLayer = true
-        inspector.layer?.backgroundColor = NSColor.white.cgColor
+        let subtitleLabel = NSTextField(labelWithString: "Choose replacement targets for controller button slots.")
+        subtitleLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        subtitleLabel.textColor = NSColor(white: 0.55, alpha: 1)
+        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        root.addSubview(previewContainer)
-        root.addSubview(inspector)
+        // Profile toolbar
+        reloadProfilePopup()
+        profilePopup.target = self
+        profilePopup.action = #selector(profileSelectionChanged)
+        profilePopup.controlSize = .regular
+        profilePopup.translatesAutoresizingMaskIntoConstraints = false
+        profilePopup.widthAnchor.constraint(equalToConstant: 180).isActive = true
+
+        let bindAppBtn = NSButton(title: "绑定应用", target: self, action: #selector(bindProfileToApp))
+        let renameBtn  = NSButton(title: "重命名", target: self, action: #selector(renameProfile))
+        let saveProfBtn = NSButton(title: "保存", target: self, action: #selector(saveMappingProfile))
+        let saveNewBtn = NSButton(title: "另存为", target: self, action: #selector(saveNewProfile))
+        let deleteProfBtn = NSButton(title: "删除配置", target: self, action: #selector(deleteCurrentProfile))
+        [bindAppBtn, renameBtn, saveProfBtn, saveNewBtn, deleteProfBtn].forEach { styleSmallDarkButton($0) }
+        deleteProfBtn.isEnabled = !editingProfile.isDefault
+
+        let profileBar = NSStackView(views: [profilePopup, bindAppBtn, flexSpacer(), renameBtn, saveProfBtn, saveNewBtn, deleteProfBtn])
+        profileBar.orientation = .horizontal
+        profileBar.alignment = .centerY
+        profileBar.spacing = 8
+        profileBar.translatesAutoresizingMaskIntoConstraints = false
+
+        // Slot columns
+        let leftButtons: [ControllerButton] = [.leftTrigger, .leftShoulder, .leftThumbstickButton, .buttonMenu,
+                                                .dpadUp, .dpadLeft, .dpadDown, .dpadRight]
+        let rightButtons: [ControllerButton] = [.rightTrigger, .rightShoulder, .rightThumbstickButton, .buttonOptions,
+                                                 .buttonY, .buttonB, .buttonA, .buttonX]
+        let centerButtons: [ControllerButton] = [.buttonHome, .buttonMicrophoneMute, .touchpadButton]
+
+        let leftStack = makeSlotColumn(buttons: leftButtons)
+        let rightStack = makeSlotColumn(buttons: rightButtons)
+
+        // Controller image
+        let controllerImage = NSImageView()
+        if let url = Bundle.module.url(forResource: "dualsense-controller", withExtension: "svg"),
+           let img = NSImage(contentsOf: url) {
+            controllerImage.image = img
+        } else {
+            let cfg = NSImage.SymbolConfiguration(pointSize: 80, weight: .thin)
+            controllerImage.image = NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: nil)
+            controllerImage.symbolConfiguration = cfg
+            controllerImage.contentTintColor = NSColor(white: 0.35, alpha: 1)
+        }
+        controllerImage.imageScaling = .scaleProportionallyDown
+        controllerImage.translatesAutoresizingMaskIntoConstraints = false
+
+        let slotsRow = NSStackView(views: [leftStack, controllerImage, rightStack])
+        slotsRow.orientation = .horizontal
+        slotsRow.alignment = .centerY
+        slotsRow.spacing = 12
+        slotsRow.translatesAutoresizingMaskIntoConstraints = false
+        leftStack.widthAnchor.constraint(equalToConstant: 190).isActive = true
+        rightStack.widthAnchor.constraint(equalToConstant: 190).isActive = true
+
+        // Center row
+        let centerRow = NSStackView()
+        centerRow.orientation = .horizontal
+        centerRow.alignment = .centerY
+        centerRow.spacing = 12
+        centerRow.translatesAutoresizingMaskIntoConstraints = false
+        for btn in centerButtons {
+            centerRow.addArrangedSubview(makeSlotView(button: btn))
+        }
+
+        root.addSubview(titleLabel)
+        root.addSubview(subtitleLabel)
+        root.addSubview(profileBar)
+        root.addSubview(slotsRow)
+        root.addSubview(centerRow)
+
         NSLayoutConstraint.activate([
-            previewContainer.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            previewContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            previewContainer.topAnchor.constraint(equalTo: root.topAnchor),
-            previewContainer.heightAnchor.constraint(equalTo: root.heightAnchor, multiplier: 0.68),
-            previewView.leadingAnchor.constraint(equalTo: previewContainer.leadingAnchor, constant: 48),
-            previewView.trailingAnchor.constraint(equalTo: previewContainer.trailingAnchor, constant: -48),
-            previewView.topAnchor.constraint(equalTo: previewContainer.topAnchor, constant: 36),
-            previewView.bottomAnchor.constraint(equalTo: previewContainer.bottomAnchor, constant: -36),
-            inspector.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            inspector.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            inspector.topAnchor.constraint(equalTo: previewContainer.bottomAnchor),
-            inspector.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            titleLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
+            titleLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 18),
+
+            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
+
+            profileBar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
+            profileBar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -28),
+            profileBar.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 14),
+
+            slotsRow.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            slotsRow.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            slotsRow.topAnchor.constraint(equalTo: profileBar.bottomAnchor, constant: 16),
+
+            controllerImage.heightAnchor.constraint(equalTo: controllerImage.widthAnchor,
+                                                     multiplier: 429.39 / 597.47),
+
+            centerRow.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            centerRow.topAnchor.constraint(equalTo: slotsRow.bottomAnchor, constant: 10),
+            centerRow.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -16)
         ])
+
         return root
     }
 
-    private func buildMappingInspector() -> NSView {
-        let root = NSStackView()
-        root.orientation = .vertical
-        root.alignment = .leading
-        root.spacing = 12
-        root.edgeInsets = NSEdgeInsets(top: 22, left: 48, bottom: 22, right: 42)
-        root.translatesAutoresizingMaskIntoConstraints = false
+    private func makeSlotColumn(buttons: [ControllerButton]) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        for btn in buttons {
+            stack.addArrangedSubview(makeSlotView(button: btn))
+        }
+        return stack
+    }
 
-        selectedTitle.font = .systemFont(ofSize: 18, weight: .bold)
-        selectedTitle.textColor = .labelColor
-        summaryLabel.font = .systemFont(ofSize: 12, weight: .regular)
-        summaryLabel.textColor = .labelColor
-        summaryLabel.maximumNumberOfLines = 3
-        advancedLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        advancedLabel.textColor = .systemOrange
-        advancedLabel.maximumNumberOfLines = 3
+    private func makeSlotView(button: ControllerButton) -> ButtonSlotView {
+        let glyph = loadGlyph(for: button)
+        let slot = ButtonSlotView(button: button, glyphImage: glyph)
+        slot.updateSummary(slotSummary(for: button))
+        slot.onChevronClicked = { [weak self, weak slot] in
+            guard let self, let slot else { return }
+            self.showBindingPopover(for: button, from: slot)
+        }
+        slotViews[button] = slot
+        return slot
+    }
 
-        configureMappingControls()
-        let gestureBar = row(PressKind.allCases.map { kind in
-            let button = NSButton(title: kind.displayName, target: self, action: #selector(selectGestureFromButton(_:)))
-            button.tag = PressKind.allCases.firstIndex(of: kind) ?? 0
-            button.bezelStyle = .rounded
-            return button
-        })
-        gestureBar.spacing = 10
-        let leftColumn = NSStackView()
-        leftColumn.orientation = .vertical
-        leftColumn.alignment = .leading
-        leftColumn.spacing = 12
-        leftColumn.addArrangedSubview(selectedTitle)
-        leftColumn.addArrangedSubview(summaryLabel)
-        leftColumn.addArrangedSubview(advancedLabel)
-        leftColumn.addArrangedSubview(row([label("触发方式", width: 86), gesturePopup]))
-        leftColumn.addArrangedSubview(row([label("绑定功能", width: 86), actionPopup]))
-        leftColumn.addArrangedSubview(row([label("快捷键", width: 86), keyPopup]))
+    private func slotSummary(for button: ControllerButton) -> String {
+        let priority: [PressKind] = [.press, .singleClick, .doubleClick, .longPress, .release]
+        for kind in priority {
+            let actions = editingProfile.mappings[ButtonGesture(button: button, kind: kind)] ?? []
+            if !actions.isEmpty { return summaryText(for: actions) }
+        }
+        return "未绑定"
+    }
 
-        let rightColumn = NSStackView()
-        rightColumn.orientation = .vertical
-        rightColumn.alignment = .leading
-        rightColumn.spacing = 12
-        rightColumn.addArrangedSubview(row([commandCheck, optionCheck, controlCheck, shiftCheck]))
-        rightColumn.addArrangedSubview(row([recordButton, chooseAppButton]))
-        appPathLabel.textColor = .labelColor
-        rightColumn.addArrangedSubview(appPathLabel)
-        rightColumn.addArrangedSubview(row([clearButton, saveButton]))
+    private func reloadSlotSummaries() {
+        for (button, slot) in slotViews {
+            slot.updateSummary(slotSummary(for: button))
+        }
+    }
 
-        let columns = row([leftColumn, rightColumn])
-        columns.spacing = 80
-        root.addArrangedSubview(gestureBar)
-        root.addArrangedSubview(columns)
+    private func showBindingPopover(for button: ControllerButton, from anchor: NSView) {
+        activePopover?.close()
+        let editor = BindingEditorController()
+        editor.controllerButton = button
+        editor.profileMappings = editingProfile.mappings
+        editor.onBindingChanged = { [weak self] gesture, actions in
+            guard let self else { return }
+            if let actions {
+                self.editingProfile.mappings[gesture] = actions
+            } else {
+                self.editingProfile.mappings.removeValue(forKey: gesture)
+            }
+            self.profileStore.upsert(self.editingProfile)
+            self.slotViews[gesture.button]?.updateSummary(self.slotSummary(for: gesture.button))
+        }
+        let pop = NSPopover()
+        pop.contentViewController = editor
+        pop.behavior = .semitransient
+        pop.contentSize = NSSize(width: 360, height: 330)
+        pop.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        activePopover = pop
+    }
 
-        let container = NSView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(root)
-        NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            root.topAnchor.constraint(equalTo: container.topAnchor),
-            root.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor)
-        ])
-        return container
+    private func reloadProfilePopup() {
+        profilePopup.removeAllItems()
+        for profile in profileStore.profiles {
+            profilePopup.addItem(withTitle: profile.name)
+            profilePopup.lastItem?.representedObject = profile.id
+        }
+        if let id = editingProfileID {
+            for index in 0..<profilePopup.numberOfItems {
+                if profilePopup.item(at: index)?.representedObject as? UUID == id {
+                    profilePopup.selectItem(at: index)
+                    break
+                }
+            }
+        }
+    }
+
+    @objc private func profileSelectionChanged() {
+        guard let id = profilePopup.selectedItem?.representedObject as? UUID,
+              let profile = profileStore.profiles.first(where: { $0.id == id }) else { return }
+        editingProfileID = id
+        editingProfile = profile
+        show(page: .mapping)
+    }
+
+    @objc private func bindProfileToApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.message = "选择要绑定此配置的应用"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let bundle = Bundle(url: url),
+              let bundleID = bundle.bundleIdentifier else {
+            let alert = NSAlert()
+            alert.messageText = "无法读取应用 Bundle ID"
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+        editingProfile.bundleIdentifier = bundleID
+        profileStore.upsert(editingProfile)
+        reloadProfilePopup()
+    }
+
+    @objc private func renameProfile() {
+        let alert = NSAlert()
+        alert.messageText = "重命名配置"
+        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "取消")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = editingProfile.name
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let newName = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty else { return }
+        editingProfile.name = newName
+        profileStore.upsert(editingProfile)
+        reloadProfilePopup()
+    }
+
+    @objc private func saveMappingProfile() {
+        profileStore.upsert(editingProfile)
+    }
+
+    @objc private func saveNewProfile() {
+        let alert = NSAlert()
+        alert.messageText = "新建配置"
+        alert.informativeText = "将当前按键映射复制到新配置"
+        alert.addButton(withTitle: "创建")
+        alert.addButton(withTitle: "取消")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = "配置名称"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newProfile = MappingProfile(name: name.isEmpty ? "新配置" : name, mappings: editingProfile.mappings)
+        profileStore.upsert(newProfile)
+        editingProfileID = newProfile.id
+        editingProfile = newProfile
+        show(page: .mapping)
+    }
+
+    @objc private func deleteCurrentProfile() {
+        guard !editingProfile.isDefault else { return }
+        let alert = NSAlert()
+        alert.messageText = "删除配置「\(editingProfile.name)」？"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "删除")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        profileStore.deleteProfile(id: editingProfile.id)
+        editingProfileID = nil
+        editingProfile = profileStore.defaultProfile()
+        show(page: .mapping)
+    }
+
+    private func styleSmallDarkButton(_ button: NSButton) {
+        button.bezelStyle = .rounded
+        button.controlSize = .regular
+        button.font = .systemFont(ofSize: 12, weight: .regular)
+    }
+
+    private func flexSpacer() -> NSView {
+        let v = NSView()
+        v.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return v
+    }
+
+    private func loadGlyph(for button: ControllerButton) -> NSImage? {
+        let nameMap: [ControllerButton: String] = [
+            .buttonA: "Cross",
+            .buttonB: "Circle",
+            .buttonX: "Square",
+            .buttonY: "Triangle",
+            .dpadUp: "D-Pad Up",
+            .dpadDown: "D-Pad Down",
+            .dpadLeft: "D-Pad Left",
+            .dpadRight: "D-Pad Right",
+            .leftShoulder: "L1",
+            .rightShoulder: "R1",
+            .leftTrigger: "L2",
+            .rightTrigger: "R2",
+            .leftThumbstickButton: "Left Stick Click",
+            .rightThumbstickButton: "Right Stick Click",
+            .buttonMenu: "Create",
+            .buttonOptions: "Options",
+            .buttonHome: "Home",
+            .touchpadButton: "Touch Pad Press"
+        ]
+        guard let fileName = nameMap[button],
+              let url = Bundle.module.url(forResource: fileName, withExtension: "svg"),
+              let img = NSImage(contentsOf: url) else {
+            if button == .buttonMicrophoneMute {
+                return NSImage(systemSymbolName: "mic.slash", accessibilityDescription: nil)
+            }
+            return nil
+        }
+        img.isTemplate = true
+        return img
     }
 
     private func configureMappingControls() {
@@ -473,7 +838,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         rowStack.spacing = 18
         content.addArrangedSubview(rowStack)
 
-        let add = hookGridCard(title: "+", subtitle: "新建 Hook", color: NSColor(calibratedWhite: 0.96, alpha: 1), index: nil)
+        let add = hookGridCard(title: "+", subtitle: "新建 Hook", color: NSColor(calibratedRed: 0.12, green: 0.16, blue: 0.24, alpha: 1), index: nil)
         add.font = .systemFont(ofSize: 42, weight: .light)
         rowStack.addArrangedSubview(add)
 
@@ -540,10 +905,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     private func hookCardColor(index: Int) -> NSColor {
         let colors = [
-            NSColor(calibratedRed: 1.00, green: 0.78, blue: 0.78, alpha: 1),
-            NSColor(calibratedRed: 0.12, green: 0.70, blue: 0.55, alpha: 1),
-            NSColor(calibratedRed: 0.28, green: 0.76, blue: 0.34, alpha: 1),
-            NSColor(calibratedRed: 0.91, green: 0.92, blue: 0.95, alpha: 1)
+            NSColor(calibratedRed: 0.15, green: 0.24, blue: 0.44, alpha: 1),
+            NSColor(calibratedRed: 0.08, green: 0.26, blue: 0.22, alpha: 1),
+            NSColor(calibratedRed: 0.10, green: 0.24, blue: 0.14, alpha: 1),
+            NSColor(calibratedRed: 0.22, green: 0.16, blue: 0.36, alpha: 1)
         ]
         return colors[index % colors.count]
     }
@@ -725,9 +1090,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
         root.addArrangedSubview(settingsSection(title: "触控板配置", rows: [
             settingsRow(title: "触控鼠标", control: configToggle(title: "", tag: 11, isOn: config.touchpad.enabled)),
-            settingsRow(title: "单指轻触点击", control: configToggle(title: "", tag: 10, isOn: config.mappings[ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick)] != nil)),
-            settingsRow(title: "双指轻触右键", control: configToggle(title: "", tag: 16, isOn: config.mappings[ButtonGesture(button: .touchpadTwoFingerTap, kind: .singleClick)] != nil)),
-            settingsRow(title: "触控按下模拟鼠标按下", control: configToggle(title: "", tag: 12, isOn: config.mappings[ButtonGesture(button: .touchpadButton, kind: .press)] != nil)),
+            settingsRow(title: "单指轻触点击", control: configToggle(title: "", tag: 10, isOn: profileStore.defaultProfile().mappings[ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick)] != nil)),
+            settingsRow(title: "双指轻触右键", control: configToggle(title: "", tag: 16, isOn: profileStore.defaultProfile().mappings[ButtonGesture(button: .touchpadTwoFingerTap, kind: .singleClick)] != nil)),
+            settingsRow(title: "触控按下模拟鼠标按下", control: configToggle(title: "", tag: 12, isOn: profileStore.defaultProfile().mappings[ButtonGesture(button: .touchpadButton, kind: .press)] != nil)),
             settingsRow(title: "双指滑动", control: configToggle(title: "", tag: 13, isOn: config.touchpad.scrollSensitivity > 0)),
             settingsRow(title: "鼠标灵敏度", control: configNumberField(value: config.touchpad.sensitivity, tag: 30)),
             settingsRow(title: "滚动灵敏度", control: configNumberField(value: config.touchpad.scrollSensitivity, tag: 31)),
@@ -801,17 +1166,29 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         switch sender.tag {
         case 10:
             let gesture = ButtonGesture(button: .touchpadOneFingerTap, kind: .singleClick)
-            config.mappings[gesture] = sender.state == .on ? [.mouseClick(.left)] : nil
+            var def = profileStore.defaultProfile()
+            def.mappings[gesture] = sender.state == .on ? [.mouseClick(.left)] : nil
+            profileStore.upsert(def)
+            if editingProfile.id == def.id { editingProfile = def }
+            return
         case 11:
             config.touchpad.enabled = sender.state == .on
         case 12:
             let gesture = ButtonGesture(button: .touchpadButton, kind: .press)
-            config.mappings[gesture] = sender.state == .on ? [.mouseClick(.left)] : nil
+            var def = profileStore.defaultProfile()
+            def.mappings[gesture] = sender.state == .on ? [.mouseClick(.left)] : nil
+            profileStore.upsert(def)
+            if editingProfile.id == def.id { editingProfile = def }
+            return
         case 13:
             config.touchpad.scrollSensitivity = sender.state == .on ? 14 : 0
         case 16:
             let gesture = ButtonGesture(button: .touchpadTwoFingerTap, kind: .singleClick)
-            config.mappings[gesture] = sender.state == .on ? [.mouseClick(.right)] : nil
+            var def = profileStore.defaultProfile()
+            def.mappings[gesture] = sender.state == .on ? [.mouseClick(.right)] : nil
+            profileStore.upsert(def)
+            if editingProfile.id == def.id { editingProfile = def }
+            return
         case 17:
             config.touchpad.invertX = sender.state == .on
         case 18:
@@ -1074,7 +1451,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     @objc private func testHook() {
         commitSelectedCommand()
         let hook = readHookFromForm(existing: selectedHookIndex().map { hooks[$0] } ?? HookDefinition(name: "test", slug: "test", commands: [HookCommand(kind: .solidLightbar)]))
-        let result = hookService.execute(hook)
+        let result = hookService.execute(hook, source: "manual-test")
         hookStatusLabel.stringValue = result.ok ? "已触发：\(result.message)" : "失败：\(result.message)"
     }
 
@@ -1204,7 +1581,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     @objc private func loadSelection() {
         selectedTitle.stringValue = selectedButton.displayName
         let gesture = currentGesture()
-        let actions = config.mappings[gesture] ?? []
+        let actions = editingProfile.mappings[gesture] ?? []
         advancedLabel.isHidden = actions.count <= 1 && actions.first?.supportedActionKind != nil
 
         if actions.count > 1 {
@@ -1269,8 +1646,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     @objc private func clearBinding() {
-        config.mappings[currentGesture()] = nil
-        configStore.save(config)
+        editingProfile.mappings[currentGesture()] = nil
+        profileStore.upsert(editingProfile)
+        reloadSlotSummaries()
         loadSelection()
     }
 
@@ -1278,25 +1656,26 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let gesture = currentGesture()
         switch currentActionKind() {
         case .none:
-            config.mappings[gesture] = nil
+            editingProfile.mappings[gesture] = nil
         case .shortcut:
-            config.mappings[gesture] = [.keyStroke(capturedStroke ?? selectedFallbackStroke())]
+            editingProfile.mappings[gesture] = [.keyStroke(capturedStroke ?? selectedFallbackStroke())]
         case .mouseLeft:
-            config.mappings[gesture] = [.mouseClick(.left)]
+            editingProfile.mappings[gesture] = [.mouseClick(.left)]
         case .mouseRight:
-            config.mappings[gesture] = [.mouseClick(.right)]
+            editingProfile.mappings[gesture] = [.mouseClick(.right)]
         case .mouseMiddle:
-            config.mappings[gesture] = [.mouseClick(.middle)]
+            editingProfile.mappings[gesture] = [.mouseClick(.middle)]
         case .appSwitch:
-            config.mappings[gesture] = [.keyStroke(appSwitchStroke())]
+            editingProfile.mappings[gesture] = [.keyStroke(appSwitchStroke())]
         case .openApplication:
             guard let selectedApplicationPath else {
                 NSSound.beep()
                 return
             }
-            config.mappings[gesture] = [.openApplication(selectedApplicationPath)]
+            editingProfile.mappings[gesture] = [.openApplication(selectedApplicationPath)]
         }
-        configStore.save(config)
+        profileStore.upsert(editingProfile)
+        reloadSlotSummaries()
         loadSelection()
     }
 
@@ -1605,5 +1984,482 @@ private extension HookColor {
             g: UInt8(clamping: Int(converted.greenComponent * 255)),
             b: UInt8(clamping: Int(converted.blueComponent * 255))
         )
+    }
+}
+
+// MARK: - ButtonSlotView
+
+final class ButtonSlotView: NSView {
+    let controllerButton: ControllerButton
+    var onChevronClicked: (() -> Void)?
+    private let summaryLabel = NSTextField(labelWithString: "—")
+
+    init(button: ControllerButton, glyphImage: NSImage?) {
+        self.controllerButton = button
+        super.init(frame: .zero)
+        setup(glyphImage: glyphImage)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setup(glyphImage: NSImage?) {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(calibratedRed: 0.10, green: 0.14, blue: 0.21, alpha: 1).cgColor
+        layer?.cornerRadius = 7
+
+        let glyphView = NSImageView()
+        if let img = glyphImage {
+            glyphView.image = img
+            glyphView.image?.isTemplate = true
+            glyphView.contentTintColor = NSColor(white: 0.68, alpha: 1)
+        } else {
+            let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .light)
+            glyphView.image = NSImage(systemSymbolName: "questionmark", accessibilityDescription: nil)
+            glyphView.symbolConfiguration = cfg
+            glyphView.contentTintColor = NSColor(white: 0.45, alpha: 1)
+        }
+        glyphView.imageScaling = .scaleProportionallyDown
+        glyphView.translatesAutoresizingMaskIntoConstraints = false
+
+        let arrowLabel = NSTextField(labelWithString: "→")
+        arrowLabel.font = .systemFont(ofSize: 10, weight: .regular)
+        arrowLabel.textColor = NSColor(white: 0.38, alpha: 1)
+        arrowLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        summaryLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        summaryLabel.textColor = NSColor(white: 0.72, alpha: 1)
+        summaryLabel.maximumNumberOfLines = 1
+        summaryLabel.lineBreakMode = .byTruncatingTail
+        summaryLabel.translatesAutoresizingMaskIntoConstraints = false
+        summaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let chevronButton = NSButton(title: "⌄", target: self, action: #selector(tappedChevron))
+        chevronButton.isBordered = false
+        chevronButton.font = .systemFont(ofSize: 11, weight: .regular)
+        chevronButton.contentTintColor = NSColor(white: 0.45, alpha: 1)
+        chevronButton.translatesAutoresizingMaskIntoConstraints = false
+
+        translatesAutoresizingMaskIntoConstraints = false
+        addSubview(glyphView)
+        addSubview(arrowLabel)
+        addSubview(summaryLabel)
+        addSubview(chevronButton)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 34),
+
+            glyphView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            glyphView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            glyphView.widthAnchor.constraint(equalToConstant: 18),
+            glyphView.heightAnchor.constraint(equalToConstant: 18),
+
+            arrowLabel.leadingAnchor.constraint(equalTo: glyphView.trailingAnchor, constant: 6),
+            arrowLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            summaryLabel.leadingAnchor.constraint(equalTo: arrowLabel.trailingAnchor, constant: 6),
+            summaryLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            summaryLabel.trailingAnchor.constraint(lessThanOrEqualTo: chevronButton.leadingAnchor, constant: -4),
+
+            chevronButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            chevronButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chevronButton.widthAnchor.constraint(equalToConstant: 16)
+        ])
+    }
+
+    func updateSummary(_ text: String) {
+        summaryLabel.stringValue = text.isEmpty ? "—" : text
+    }
+
+    @objc private func tappedChevron() {
+        onChevronClicked?()
+    }
+}
+
+// MARK: - BindingEditorController
+
+final class BindingEditorController: NSViewController {
+    var controllerButton: ControllerButton = .buttonA
+    var profileMappings: [ButtonGesture: [Action]] = [:]
+    var onBindingChanged: ((ButtonGesture, [Action]?) -> Void)?
+
+    private var selectedKind: PressKind = .press
+    private var capturedStroke: KeyStroke?
+    private var selectedAppPath: String?
+    private var keyMonitor: Any?
+
+    private let gestureSC = NSSegmentedControl()
+    private let currentBindingLabel = NSTextField(labelWithString: "—")
+    private let actionPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let keyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let cmdCheck  = NSButton(checkboxWithTitle: "⌘", target: nil, action: nil)
+    private let optCheck  = NSButton(checkboxWithTitle: "⌥", target: nil, action: nil)
+    private let ctlCheck  = NSButton(checkboxWithTitle: "⌃", target: nil, action: nil)
+    private let shfCheck  = NSButton(checkboxWithTitle: "⇧", target: nil, action: nil)
+    private let recordBtn = NSButton(title: "录制", target: nil, action: nil)
+    private let appBtn    = NSButton(title: "选择 App", target: nil, action: nil)
+    private let appLabel  = NSTextField(labelWithString: "未选择")
+    private let clearBtn  = NSButton(title: "清空", target: nil, action: nil)
+    private let saveBtn   = NSButton(title: "保存", target: nil, action: nil)
+
+    override func loadView() {
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 330))
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor(calibratedRed: 0.09, green: 0.11, blue: 0.16, alpha: 1).cgColor
+        buildUI()
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        stopRecording()
+    }
+
+    private func buildUI() {
+        let titleLabel = NSTextField(labelWithString: controllerButton.displayName)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.textColor = .white
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let kinds = PressKind.allCases
+        gestureSC.segmentCount = kinds.count
+        for (i, k) in kinds.enumerated() {
+            gestureSC.setLabel(k.displayName, forSegment: i)
+        }
+        gestureSC.selectedSegment = PressKind.allCases.firstIndex(of: .press) ?? 0
+        gestureSC.target = self
+        gestureSC.action = #selector(gestureChanged)
+        gestureSC.controlSize = .small
+        gestureSC.translatesAutoresizingMaskIntoConstraints = false
+
+        currentBindingLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        currentBindingLabel.textColor = NSColor(white: 0.6, alpha: 1)
+        currentBindingLabel.maximumNumberOfLines = 1
+        currentBindingLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let sep = NSBox()
+        sep.boxType = .separator
+        sep.translatesAutoresizingMaskIntoConstraints = false
+
+        setupActionPopup()
+        setupKeyPopup()
+        [cmdCheck, optCheck, ctlCheck, shfCheck].forEach {
+            $0.contentTintColor = .labelColor
+            $0.target = self
+            $0.action = #selector(modifierChanged)
+            $0.translatesAutoresizingMaskIntoConstraints = false
+        }
+        recordBtn.target = self
+        recordBtn.action = #selector(toggleRecording)
+        appBtn.target = self
+        appBtn.action = #selector(chooseApp)
+        appLabel.font = .systemFont(ofSize: 10)
+        appLabel.textColor = NSColor(white: 0.55, alpha: 1)
+        appLabel.maximumNumberOfLines = 1
+        appLabel.lineBreakMode = .byTruncatingMiddle
+        appLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        clearBtn.target = self
+        clearBtn.action = #selector(clearAction)
+        saveBtn.target = self
+        saveBtn.action = #selector(saveAction)
+        saveBtn.bezelStyle = .rounded
+        saveBtn.keyEquivalent = "\r"
+
+        [actionPopup, keyPopup].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            $0.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        }
+        [recordBtn, appBtn, clearBtn, saveBtn].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
+
+        let modRow = NSStackView(views: [cmdCheck, optCheck, ctlCheck, shfCheck, recordBtn])
+        modRow.spacing = 8
+        modRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let appRow = NSStackView(views: [appBtn, appLabel])
+        appRow.spacing = 8
+        appRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let bottomRow = NSStackView(views: [clearBtn, NSView(), saveBtn])
+        bottomRow.orientation = .horizontal
+        bottomRow.spacing = 8
+        (bottomRow.arrangedSubviews[1] as NSView).setContentHuggingPriority(.defaultLow, for: .horizontal)
+        bottomRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 14, right: 16)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let actionLabel = NSTextField(labelWithString: "绑定功能")
+        actionLabel.font = .systemFont(ofSize: 11)
+        actionLabel.textColor = NSColor(white: 0.55, alpha: 1)
+
+        let keyLabel = NSTextField(labelWithString: "快捷键")
+        keyLabel.font = .systemFont(ofSize: 11)
+        keyLabel.textColor = NSColor(white: 0.55, alpha: 1)
+
+        stack.addArrangedSubview(titleLabel)
+        stack.addArrangedSubview(gestureSC)
+        stack.addArrangedSubview(currentBindingLabel)
+        stack.addArrangedSubview(sep)
+        stack.addArrangedSubview(actionLabel)
+        stack.addArrangedSubview(actionPopup)
+        stack.addArrangedSubview(keyLabel)
+        stack.addArrangedSubview(keyPopup)
+        stack.addArrangedSubview(modRow)
+        stack.addArrangedSubview(appRow)
+        stack.addArrangedSubview(bottomRow)
+
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: view.topAnchor),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor),
+            sep.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32),
+            bottomRow.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32),
+            gestureSC.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32)
+        ])
+
+        // Pre-select the gesture kind that already has a binding for this button
+        let bindingPriority: [PressKind] = [.press, .singleClick, .doubleClick, .longPress, .release]
+        for kind in bindingPriority {
+            if profileMappings[ButtonGesture(button: controllerButton, kind: kind)] != nil,
+               let idx = PressKind.allCases.firstIndex(of: kind) {
+                gestureSC.selectedSegment = idx
+                break
+            }
+        }
+
+        reloadForCurrentGesture()
+    }
+
+    private func setupActionPopup() {
+        [
+            ("无绑定", ActionKind.none.rawValue),
+            ("快捷键", ActionKind.shortcut.rawValue),
+            ("鼠标左键", ActionKind.mouseLeft.rawValue),
+            ("鼠标右键", ActionKind.mouseRight.rawValue),
+            ("鼠标中键", ActionKind.mouseMiddle.rawValue),
+            ("程序切换", ActionKind.appSwitch.rawValue),
+            ("打开应用", ActionKind.openApplication.rawValue)
+        ].forEach { title, value in
+            actionPopup.addItem(withTitle: title)
+            actionPopup.lastItem?.representedObject = value
+        }
+        actionPopup.target = self
+        actionPopup.action = #selector(actionTypeChanged)
+    }
+
+    private func setupKeyPopup() {
+        for option in KeyCatalog.options {
+            keyPopup.addItem(withTitle: option.title)
+            keyPopup.lastItem?.representedObject = option.keyCode
+        }
+        keyPopup.target = self
+        keyPopup.action = #selector(keyChanged)
+    }
+
+    @objc private func gestureChanged() {
+        reloadForCurrentGesture()
+    }
+
+    private func reloadForCurrentGesture() {
+        let gesture = currentGesture()
+        let actions = profileMappings[gesture] ?? []
+        let summary = summaryFor(actions: actions)
+        currentBindingLabel.stringValue = summary.isEmpty ? "—" : summary
+        capturedStroke = nil
+        selectedAppPath = nil
+        let first = actions.first
+        let kind = first?.supportedActionKind ?? .none
+        selectActionKind(kind)
+        switch first {
+        case .keyStroke(let stroke):
+            applyStroke(stroke)
+        case .openApplication(let path):
+            selectedAppPath = path
+            appLabel.stringValue = (path as NSString).lastPathComponent
+        default:
+            appLabel.stringValue = "未选择"
+        }
+        updateControlVisibility()
+    }
+
+    @objc private func actionTypeChanged() {
+        if currentActionKind() == .appSwitch {
+            let stroke = appSwitchStroke()
+            capturedStroke = stroke
+            applyStroke(stroke)
+        }
+        updateControlVisibility()
+    }
+
+    @objc private func keyChanged() {
+        guard currentActionKind() == .shortcut else { return }
+        capturedStroke = selectedFallbackStroke()
+    }
+
+    @objc private func modifierChanged() {
+        guard currentActionKind() == .shortcut else { return }
+        capturedStroke = selectedFallbackStroke()
+    }
+
+    @objc private func toggleRecording() {
+        if keyMonitor != nil {
+            stopRecording()
+            return
+        }
+        recordBtn.title = "按下快捷键…"
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.captureEvent(event)
+            return nil
+        }
+    }
+
+    private func captureEvent(_ event: NSEvent) {
+        guard event.keyCode != 53 else { stopRecording(); return }
+        let mods = modifiersFrom(event.modifierFlags)
+        let stroke = KeyStroke(keyCode: UInt16(event.keyCode), modifiers: mods)
+        capturedStroke = stroke
+        applyStroke(stroke)
+        selectActionKind(.shortcut)
+        currentBindingLabel.stringValue = KeyCatalog.describe(stroke)
+        stopRecording()
+    }
+
+    private func stopRecording() {
+        if let m = keyMonitor { NSEvent.removeMonitor(m) }
+        keyMonitor = nil
+        recordBtn.title = "录制"
+    }
+
+    @objc private func chooseApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        selectedAppPath = url.path
+        appLabel.stringValue = url.lastPathComponent
+        selectActionKind(.openApplication)
+        updateControlVisibility()
+    }
+
+    @objc private func clearAction() {
+        onBindingChanged?(currentGesture(), nil)
+        profileMappings.removeValue(forKey: currentGesture())
+        reloadForCurrentGesture()
+    }
+
+    @objc private func saveAction() {
+        let gesture = currentGesture()
+        let actions: [Action]?
+        switch currentActionKind() {
+        case .none:
+            actions = nil
+        case .shortcut:
+            actions = [.keyStroke(capturedStroke ?? selectedFallbackStroke())]
+        case .mouseLeft:
+            actions = [.mouseClick(.left)]
+        case .mouseRight:
+            actions = [.mouseClick(.right)]
+        case .mouseMiddle:
+            actions = [.mouseClick(.middle)]
+        case .appSwitch:
+            actions = [.keyStroke(appSwitchStroke())]
+        case .openApplication:
+            guard let path = selectedAppPath else { NSSound.beep(); return }
+            actions = [.openApplication(path)]
+        }
+        onBindingChanged?(gesture, actions)
+        profileMappings[gesture] = actions
+        reloadForCurrentGesture()
+    }
+
+    private func updateControlVisibility() {
+        let kind = currentActionKind()
+        let isShortcut = kind == .shortcut || kind == .appSwitch
+        keyPopup.isHidden = !isShortcut
+        [cmdCheck, optCheck, ctlCheck, shfCheck, recordBtn].forEach { $0.isEnabled = isShortcut }
+        appBtn.isHidden = kind != .openApplication
+        appLabel.isHidden = kind != .openApplication
+    }
+
+    private func currentGesture() -> ButtonGesture {
+        ButtonGesture(button: controllerButton, kind: currentKind())
+    }
+
+    private func currentKind() -> PressKind {
+        let idx = gestureSC.selectedSegment
+        return PressKind.allCases.indices.contains(idx) ? PressKind.allCases[idx] : .press
+    }
+
+    private func currentActionKind() -> ActionKind {
+        guard let raw = actionPopup.selectedItem?.representedObject as? String,
+              let kind = ActionKind(rawValue: raw) else { return .none }
+        return kind
+    }
+
+    private func selectActionKind(_ kind: ActionKind) {
+        for i in 0..<actionPopup.numberOfItems where actionPopup.item(at: i)?.representedObject as? String == kind.rawValue {
+            actionPopup.selectItem(at: i)
+            return
+        }
+    }
+
+    private func selectedFallbackStroke() -> KeyStroke {
+        let code = keyPopup.selectedItem?.representedObject as? UInt16 ?? KeyCatalog.tabCode
+        return KeyStroke(keyCode: code, modifiers: selectedModifiers())
+    }
+
+    private func selectedModifiers() -> [KeyModifier] {
+        var mods: [KeyModifier] = []
+        if cmdCheck.state == .on { mods.append(.command) }
+        if optCheck.state == .on { mods.append(.option) }
+        if ctlCheck.state == .on { mods.append(.control) }
+        if shfCheck.state == .on { mods.append(.shift) }
+        return mods
+    }
+
+    private func modifiersFrom(_ flags: NSEvent.ModifierFlags) -> [KeyModifier] {
+        var mods: [KeyModifier] = []
+        if flags.contains(.command) { mods.append(.command) }
+        if flags.contains(.option)  { mods.append(.option) }
+        if flags.contains(.control) { mods.append(.control) }
+        if flags.contains(.shift)   { mods.append(.shift) }
+        return mods
+    }
+
+    private func applyStroke(_ stroke: KeyStroke) {
+        capturedStroke = stroke
+        cmdCheck.state = stroke.modifiers.contains(.command) ? .on : .off
+        optCheck.state = stroke.modifiers.contains(.option)  ? .on : .off
+        ctlCheck.state = stroke.modifiers.contains(.control) ? .on : .off
+        shfCheck.state = stroke.modifiers.contains(.shift)   ? .on : .off
+        for i in 0..<keyPopup.numberOfItems where keyPopup.item(at: i)?.representedObject as? UInt16 == stroke.keyCode {
+            keyPopup.selectItem(at: i)
+            break
+        }
+    }
+
+    private func appSwitchStroke() -> KeyStroke {
+        if controllerButton == .leftShoulder {
+            return KeyStroke(keyCode: KeyCatalog.tabCode, modifiers: [.command, .shift])
+        }
+        return KeyStroke(keyCode: KeyCatalog.tabCode, modifiers: [.command])
+    }
+
+    private func summaryFor(actions: [Action]) -> String {
+        guard let action = actions.first else { return "—" }
+        if actions.count > 1 { return "多动作" }
+        switch action {
+        case .keyStroke(let stroke): return KeyCatalog.describe(stroke)
+        case .mouseClick(.left):  return "鼠标左键"
+        case .mouseClick(.right): return "鼠标右键"
+        case .mouseClick(.middle): return "鼠标中键"
+        case .openApplication(let path): return "打开 " + (path as NSString).lastPathComponent
+        default: return "高级动作"
+        }
     }
 }

@@ -7,6 +7,8 @@ public final class StatusItemController {
     public var onOpenSettings: (() -> Void)?
     public var onToggleMouse: (() -> Void)?
     public var onRequestAccessibility: (() -> Void)?
+    public var onOpenDiagnosticsLog: (() -> Void)?
+    public var onCopyDiagnosticsLogPath: (() -> Void)?
     public var onQuit: (() -> Void)?
 
     public init() {}
@@ -55,6 +57,16 @@ public final class StatusItemController {
         permission.isEnabled = !accessibilityTrusted
         menu.addItem(permission)
 
+        menu.addItem(NSMenuItem.separator())
+
+        let openLog = NSMenuItem(title: "打开诊断日志", action: #selector(openDiagnosticsLog), keyEquivalent: "")
+        openLog.target = self
+        menu.addItem(openLog)
+
+        let copyLogPath = NSMenuItem(title: "复制诊断日志路径", action: #selector(copyDiagnosticsLogPath), keyEquivalent: "")
+        copyLogPath.target = self
+        menu.addItem(copyLogPath)
+
         let settings = NSMenuItem(title: "设置...", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -69,5 +81,7 @@ public final class StatusItemController {
     @objc private func openSettings() { onOpenSettings?() }
     @objc private func toggleMouse() { onToggleMouse?() }
     @objc private func requestAccessibility() { onRequestAccessibility?() }
+    @objc private func openDiagnosticsLog() { onOpenDiagnosticsLog?() }
+    @objc private func copyDiagnosticsLogPath() { onCopyDiagnosticsLogPath?() }
     @objc private func quit() { onQuit?() }
 }

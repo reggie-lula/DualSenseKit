@@ -28,6 +28,12 @@ public final class DualSenseHIDService: @unchecked Sendable {
     private let maxRawReports = 60
     private var isOpen = false
     private var statusText = "not_started"
+    private var currentOutputSource = "direct"
+    private var controllerName: String?
+    private var managerOpenedAt: DispatchTime?
+    private var deviceMatchedAt: DispatchTime?
+    private var deviceOpenedAt: DispatchTime?
+    private var firstInputReportAt: DispatchTime?
     private var outputSequence: UInt8 = 0
     private var outputState = DualSenseOutputState()
     private var rumbleStopWorkItem: DispatchWorkItem?
@@ -75,6 +81,12 @@ public final class DualSenseHIDService: @unchecked Sendable {
             let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
             self.manager = manager
             self.statusText = result == kIOReturnSuccess ? "scanning" : "manager_open_failed_\(String(format: "%08x", result))"
+            self.managerOpenedAt = result == kIOReturnSuccess ? .now() : nil
+            DiagnosticsLog.write(event: "hid.manager.open", [
+                "appMs": "\(DiagnosticsLog.millisecondsSinceAppStart())",
+                "result": String(format: "%08x", result),
+                "status": self.statusText
+            ])
             if result == kIOReturnSuccess,
                let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> {
                 matchedDevice = devices.first
@@ -100,6 +112,12 @@ public final class DualSenseHIDService: @unchecked Sendable {
             device = nil
             manager = nil
             isOpen = false
+            currentOutputSource = "direct"
+            controllerName = nil
+            managerOpenedAt = nil
+            deviceMatchedAt = nil
+            deviceOpenedAt = nil
+            firstInputReportAt = nil
             rumbleStopWorkItem?.cancel()
             rumbleStopWorkItem = nil
             effectPatternTimer?.cancel()
@@ -133,6 +151,18 @@ public final class DualSenseHIDService: @unchecked Sendable {
     public func recentRawReports(limit: Int = 20) -> [RawHIDReport] {
         queue.sync {
             Array(rawReports.suffix(max(0, min(limit, maxRawReports))))
+        }
+    }
+
+    public func setControllerContext(name: String?) {
+        queue.sync {
+            controllerName = name
+        }
+    }
+
+    public func setOutputSource(_ source: String?) {
+        queue.sync {
+            currentOutputSource = source?.isEmpty == false ? source! : "direct"
         }
     }
 
@@ -170,6 +200,7 @@ public final class DualSenseHIDService: @unchecked Sendable {
         let safeBrightness = brightness.map { min($0, 2) }
         return queue.sync {
             guard let device, isOpen else {
+                stageOutputLocked(.playerLEDs(mask: safeMask, brightness: safeBrightness), reason: "hid_not_open")
                 statusText = "hid_not_open"
                 return false
             }
@@ -382,6 +413,7 @@ public final class DualSenseHIDService: @unchecked Sendable {
         queue.sync {
             cancelEffectPatternLocked()
             guard let device, isOpen else {
+                stageOutputLocked(.lightbar(red: red, green: green, blue: blue, brightness: brightness), reason: "hid_not_open")
                 statusText = "hid_not_open"
                 return false
             }
@@ -544,10 +576,16 @@ public final class DualSenseHIDService: @unchecked Sendable {
     fileprivate func attach(_ matchedDevice: IOHIDDevice) {
         queue.sync {
             guard device == nil else { return }
+            deviceMatchedAt = .now()
             device = matchedDevice
+            DiagnosticsLog.write(event: "hid.device.matched", diagnosticPayloadLocked())
             let result = IOHIDDeviceOpen(matchedDevice, IOOptionBits(kIOHIDOptionsTypeNone))
             isOpen = result == kIOReturnSuccess
+            deviceOpenedAt = isOpen ? .now() : nil
             statusText = isOpen ? "open" : "device_open_failed_\(String(format: "%08x", result))"
+            var payload = diagnosticPayloadLocked()
+            payload["result"] = String(format: "%08x", result)
+            DiagnosticsLog.write(event: "hid.device.open", payload)
             IOHIDDeviceScheduleWithRunLoop(matchedDevice, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
             inputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: inputBufferSize)
             inputBuffer?.initialize(repeating: 0, count: inputBufferSize)
@@ -560,11 +598,57 @@ public final class DualSenseHIDService: @unchecked Sendable {
                     Unmanaged.passUnretained(self).toOpaque()
                 )
             }
+            if isOpen {
+                sendInitializationReportLocked(device: matchedDevice)
+            }
         }
+    }
+
+    private func sendInitializationReportLocked(device: IOHIDDevice) {
+        var initState = DualSenseOutputState()
+        // validFlag1 defaults to 0xf7 — claims control of all LED/motor features
+        initState.lightbarSetup = 0x02  // take lightbar from system player-color scheme
+        let sequence = nextOutputSequence()
+        let btReport = DualSenseProtocol.bluetoothOutputReport(state: initState, sequence: sequence)
+        let usbReport = DualSenseProtocol.usbOutputReport(state: initState)
+        let btPayload = Data(btReport.dropFirst())
+        let attempts: [(IOHIDReportType, CFIndex, Data, String)] = [
+            (kIOHIDReportTypeOutput, CFIndex(btReport[0]), btReport, "init_bt_full"),
+            (kIOHIDReportTypeOutput, CFIndex(btReport[0]), btPayload, "init_bt_payload"),
+            (kIOHIDReportTypeOutput, 0, btReport, "init_bt_zero"),
+            (kIOHIDReportTypeOutput, CFIndex(usbReport[0]), usbReport, "init_usb_full"),
+            (kIOHIDReportTypeOutput, 0, usbReport, "init_usb_zero")
+        ]
+        var lastResult: IOReturn = kIOReturnError
+        var usedAttempt = "none"
+        for (type, reportID, data, name) in attempts {
+            let result = data.withUnsafeBytes { buffer -> IOReturn in
+                guard let base = buffer.baseAddress else { return kIOReturnBadArgument }
+                return IOHIDDeviceSetReport(device, type, reportID, base.assumingMemoryBound(to: UInt8.self), data.count)
+            }
+            lastResult = result
+            if result == kIOReturnSuccess {
+                usedAttempt = name
+                break
+            }
+        }
+        statusText = lastResult == kIOReturnSuccess ? "initialized_via_\(usedAttempt)" : "init_report_failed"
+        var payload = diagnosticPayloadLocked()
+        payload["result"] = String(format: "%08x", lastResult)
+        payload["attempt"] = usedAttempt
+        DiagnosticsLog.write(event: "hid.device.init", payload)
     }
 
     fileprivate func handleInputReport(data: Data) {
         let reportID = data.first ?? 0
+        if firstInputReportAt == nil {
+            firstInputReportAt = .now()
+            var payload = diagnosticPayloadLocked()
+            payload["reportID"] = String(format: "%02x", reportID)
+            payload["length"] = "\(data.count)"
+            payload["reportBytesHexPrefix"] = data.hexPrefix(count: 24)
+            DiagnosticsLog.write(event: "hid.input.firstReport", payload)
+        }
         rawReports.append(RawHIDReport(
             reportID: reportID,
             length: data.count,
@@ -658,31 +742,49 @@ public final class DualSenseHIDService: @unchecked Sendable {
         }
     }
 
-    private func sendReport(_ effect: HIDOutputEffect, device: IOHIDDevice) -> IOReturn {
+    private func stageOutputLocked(_ effect: HIDOutputEffect, reason: String) {
+        applyOutputEffect(effect, to: &outputState)
+        let sequence = nextOutputSequence()
+        var payload = diagnosticPayloadLocked()
+        payload["intent"] = effect.intentName
+        payload["source"] = currentOutputSource
+        payload["sequence"] = "\(sequence)"
+        payload["reason"] = reason
+        payload["validFlag0"] = String(format: "%02x", outputState.validFlag0)
+        payload["validFlag1"] = String(format: "%02x", outputState.validFlag1)
+        payload["validFlag2"] = String(format: "%02x", outputState.validFlag2)
+        DiagnosticsLog.write(event: "hid.output.staged", payload)
+    }
+
+    private func applyOutputEffect(_ effect: HIDOutputEffect, to state: inout DualSenseOutputState) {
         switch effect {
         case .playerLEDs(let mask, let brightness):
-            DualSenseProtocol.apply(.playerLEDs(mask: mask, brightness: brightness), to: &outputState)
+            DualSenseProtocol.apply(.playerLEDs(mask: mask, brightness: brightness), to: &state)
         case .rumble(let leftMotor, let rightMotor):
-            DualSenseProtocol.apply(.rumble(leftMotor: leftMotor, rightMotor: rightMotor), to: &outputState)
+            DualSenseProtocol.apply(.rumble(leftMotor: leftMotor, rightMotor: rightMotor), to: &state)
         case .micMuteLED(let control):
-            DualSenseProtocol.apply(.micMuteLED(control: control), to: &outputState)
+            DualSenseProtocol.apply(.micMuteLED(control: control), to: &state)
         case .lightbar(let red, let green, let blue, let brightness):
-            DualSenseProtocol.apply(.lightbar(red: red, green: green, blue: blue, brightness: brightness), to: &outputState)
+            DualSenseProtocol.apply(.lightbar(red: red, green: green, blue: blue, brightness: brightness), to: &state)
         case .adaptiveTrigger(let side, let mode, let params):
-            DualSenseProtocol.apply(.adaptiveTrigger(side: side, mode: mode, params: params), to: &outputState)
+            DualSenseProtocol.apply(.adaptiveTrigger(side: side, mode: mode, params: params), to: &state)
         case .audioVolume(let headphone, let speaker):
-            DualSenseProtocol.apply(.audioVolume(headphone: headphone, speaker: speaker), to: &outputState)
+            DualSenseProtocol.apply(.audioVolume(headphone: headphone, speaker: speaker), to: &state)
         case .combined(let lightbar, let rumble):
             if let lightbar {
                 DualSenseProtocol.apply(
                     .lightbar(red: lightbar.red, green: lightbar.green, blue: lightbar.blue, brightness: lightbar.brightness),
-                    to: &outputState
+                    to: &state
                 )
             }
             if let rumble {
-                DualSenseProtocol.apply(.rumble(leftMotor: rumble.leftMotor, rightMotor: rumble.rightMotor), to: &outputState)
+                DualSenseProtocol.apply(.rumble(leftMotor: rumble.leftMotor, rightMotor: rumble.rightMotor), to: &state)
             }
         }
+    }
+
+    private func sendReport(_ effect: HIDOutputEffect, device: IOHIDDevice) -> IOReturn {
+        applyOutputEffect(effect, to: &outputState)
         var reportState = outputState
         reportState.validFlag0 = 0
         reportState.validFlag1 = 0
@@ -715,6 +817,7 @@ public final class DualSenseHIDService: @unchecked Sendable {
         let report = DualSenseProtocol.bluetoothOutputReport(state: reportState, sequence: sequence)
         outputEvent?(BridgeEvent(type: "hid.output.request", payload: [
             "intent": effect.intentName,
+            "source": currentOutputSource,
             "sequence": "\(sequence)",
             "reportID": String(format: "%02x", report.first ?? 0),
             "reportLength": "\(report.count)",
@@ -723,6 +826,17 @@ public final class DualSenseHIDService: @unchecked Sendable {
             "validFlag1": String(format: "%02x", reportState.validFlag1),
             "validFlag2": String(format: "%02x", reportState.validFlag2)
         ]))
+        var requestPayload = diagnosticPayloadLocked()
+        requestPayload["intent"] = effect.intentName
+        requestPayload["source"] = currentOutputSource
+        requestPayload["sequence"] = "\(sequence)"
+        requestPayload["reportID"] = String(format: "%02x", report.first ?? 0)
+        requestPayload["reportLength"] = "\(report.count)"
+        requestPayload["reportBytesHexPrefix"] = report.hexPrefix(count: 24)
+        requestPayload["validFlag0"] = String(format: "%02x", reportState.validFlag0)
+        requestPayload["validFlag1"] = String(format: "%02x", reportState.validFlag1)
+        requestPayload["validFlag2"] = String(format: "%02x", reportState.validFlag2)
+        DiagnosticsLog.write(event: "hid.output.request", requestPayload)
         let payloadWithoutReportID = Data(report.dropFirst())
         let attempts: [(IOHIDReportType, CFIndex, Data, String)] = [
             (kIOHIDReportTypeOutput, CFIndex(report[0]), report, "output_full"),
@@ -746,6 +860,7 @@ public final class DualSenseHIDService: @unchecked Sendable {
                 statusText = "report_sent_via_\(name)"
                 outputEvent?(BridgeEvent(type: "hid.output.success", payload: [
                     "intent": effect.intentName,
+                    "source": currentOutputSource,
                     "sequence": "\(sequence)",
                     "attempt": name,
                     "reportID": "\(reportID)",
@@ -754,6 +869,13 @@ public final class DualSenseHIDService: @unchecked Sendable {
                     "ok": "true",
                     "status": statusText
                 ]))
+                var payload = requestPayload
+                payload["attempt"] = name
+                payload["attemptReportID"] = "\(reportID)"
+                payload["attemptLength"] = "\(data.count)"
+                payload["result"] = String(format: "%08x", result)
+                payload["status"] = statusText
+                DiagnosticsLog.write(event: "hid.output.success", payload)
                 return result
             }
             failures.append("\(name)=\(String(format: "%08x", result))")
@@ -762,12 +884,18 @@ public final class DualSenseHIDService: @unchecked Sendable {
         statusText = "set_report_failed_\(failures.joined(separator: ","))"
         outputEvent?(BridgeEvent(type: "hid.output.failure", payload: [
             "intent": effect.intentName,
+            "source": currentOutputSource,
             "sequence": "\(sequence)",
             "failures": failures.joined(separator: ","),
             "lastResult": String(format: "%08x", lastResult),
             "ok": "false",
             "status": statusText
         ]))
+        var payload = requestPayload
+        payload["failures"] = failures.joined(separator: ",")
+        payload["lastResult"] = String(format: "%08x", lastResult)
+        payload["status"] = statusText
+        DiagnosticsLog.write(event: "hid.output.failure", payload)
         return lastResult
     }
 
@@ -839,10 +967,14 @@ public final class DualSenseHIDService: @unchecked Sendable {
         IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
         let result = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
         isOpen = result == kIOReturnSuccess
+        deviceOpenedAt = isOpen ? .now() : deviceOpenedAt
         IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         if result != kIOReturnSuccess {
             statusText = "device_reopen_failed_\(String(format: "%08x", result))"
         }
+        var payload = diagnosticPayloadLocked()
+        payload["result"] = String(format: "%08x", result)
+        DiagnosticsLog.write(event: "hid.device.reopen", payload)
     }
 
     private func match(productID: Int) -> [String: Any] {
@@ -869,6 +1001,22 @@ public final class DualSenseHIDService: @unchecked Sendable {
     private func connectionType() -> DualSenseConnection {
         let transport = stringProperty(kIOHIDTransportKey)?.lowercased() ?? ""
         return transport.contains("bluetooth") ? .bluetooth : .usb
+    }
+
+    private func diagnosticPayloadLocked() -> [String: String] {
+        [
+            "appMs": "\(DiagnosticsLog.millisecondsSinceAppStart())",
+            "controller": controllerName ?? "none",
+            "hidConnected": "\(device != nil)",
+            "hidWritable": "\(isOpen)",
+            "transport": stringProperty(kIOHIDTransportKey) ?? "unknown",
+            "productID": intProperty(kIOHIDProductIDKey).map { String(format: "%04x", $0) } ?? "unknown",
+            "status": statusText,
+            "managerOpenMs": "\(DiagnosticsLog.milliseconds(since: managerOpenedAt))",
+            "deviceMatchedMs": "\(DiagnosticsLog.milliseconds(since: deviceMatchedAt))",
+            "deviceOpenMs": "\(DiagnosticsLog.milliseconds(since: deviceOpenedAt))",
+            "firstInputMs": "\(DiagnosticsLog.milliseconds(since: firstInputReportAt))"
+        ]
     }
 
     private func audioStatusReliability(transport: String?, status: DualSenseAudioStatus?) -> String {
@@ -949,8 +1097,8 @@ public final class DualSenseHIDService: @unchecked Sendable {
         case .dpadRight: return .dpadRight
         case .l1: return .leftShoulder
         case .r1: return .rightShoulder
-        case .l2: return .leftTrigger
-        case .r2: return .rightTrigger
+        case .l2: return nil  // triggers handled via GameController analog values to avoid double-fire
+        case .r2: return nil  // triggers handled via GameController analog values to avoid double-fire
         case .create: return .buttonMenu
         case .options: return .buttonOptions
         case .l3: return .leftThumbstickButton

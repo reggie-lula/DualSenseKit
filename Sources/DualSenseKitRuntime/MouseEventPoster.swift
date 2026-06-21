@@ -25,7 +25,22 @@ public final class MouseEventPoster: MousePosting {
         let mainMaxY = NSScreen.screens.first?.frame.maxY ?? screenFrame.maxY
         let nextQuartz = CGPoint(x: nextAppKit.x, y: mainMaxY - nextAppKit.y)
         CGWarpMouseCursorPosition(nextQuartz)
-        CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: nextQuartz, mouseButton: .left)?
+
+        // When a mouse button is held down, post a drag event so the window manager
+        // treats the movement as a click-drag (required for window/file dragging).
+        let pressed = NSEvent.pressedMouseButtons
+        let eventType: CGEventType
+        let mouseButton: CGMouseButton
+        if pressed & (1 << 0) != 0 {
+            eventType = .leftMouseDragged;  mouseButton = .left
+        } else if pressed & (1 << 1) != 0 {
+            eventType = .rightMouseDragged; mouseButton = .right
+        } else if pressed & (1 << 2) != 0 {
+            eventType = .otherMouseDragged; mouseButton = .center
+        } else {
+            eventType = .mouseMoved;        mouseButton = .left
+        }
+        CGEvent(mouseEventSource: nil, mouseType: eventType, mouseCursorPosition: nextQuartz, mouseButton: mouseButton)?
             .post(tap: .cghidEventTap)
     }
 

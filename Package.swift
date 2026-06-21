@@ -33,7 +33,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "DualSenseKitApp",
-            dependencies: ["DualSenseKitRuntime"]
+            dependencies: ["DualSenseKitRuntime"],
+            resources: [
+                .process("Resources")
+            ]
         ),
         .target(
             name: "DualSenseKitDemoCore",

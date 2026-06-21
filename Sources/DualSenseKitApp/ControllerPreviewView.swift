@@ -7,15 +7,15 @@ final class ControllerPreviewView: NSView {
     }
     var onSelectButton: ((ControllerButton) -> Void)?
 
-    private let accent = NSColor(calibratedRed: 0.12, green: 0.48, blue: 0.88, alpha: 1)
-    private let ink = NSColor(calibratedWhite: 0.16, alpha: 1)
-    private let fill = NSColor(calibratedWhite: 0.98, alpha: 1)
+    private let accent = NSColor(calibratedRed: 0.22, green: 0.52, blue: 0.95, alpha: 1)
+    private let ink = NSColor(calibratedWhite: 0.50, alpha: 1)
+    private let fill = NSColor(calibratedRed: 0.14, green: 0.17, blue: 0.24, alpha: 1)
 
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        NSColor(calibratedWhite: 0.985, alpha: 1).setFill()
+        NSColor(calibratedRed: 0.075, green: 0.092, blue: 0.132, alpha: 1).setFill()
         dirtyRect.fill()
 
         let bounds = controllerBounds()

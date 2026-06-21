@@ -340,6 +340,7 @@ public enum DualSenseProtocol {
                 state.lightbarGreen = UInt8(Float(green) * scale)
                 state.lightbarBlue = UInt8(Float(blue) * scale)
             }
+            state.lightbarSetup = 0x02  // take lightbar from system player-color scheme
             state.validFlag1 |= 0x04
             state.validFlag1 &= ~0x08
         case .adaptiveTrigger(let side, let mode, let params):

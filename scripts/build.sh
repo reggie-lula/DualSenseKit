@@ -40,23 +40,18 @@ printf 'APPL????' > "$APP_DIR/Contents/PkgInfo"
 xattr -cr "$APP_DIR"
 
 BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw "$PLIST")"
-SIGN_IDENTITY="${DUALSENSEKIT_CODESIGN_IDENTITY:-${CODESIGN_IDENTITY:-DualSenseKit}}"
-if [[ -n "$SIGN_IDENTITY" ]] && security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY"; then
-  codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
-else
-  codesign \
-    --force \
-    --deep \
-    --sign - \
-    --identifier "$BUNDLE_ID" \
-    --requirements "=designated => identifier \"$BUNDLE_ID\"" \
-    "$APP_DIR"
-  cat >&2 <<'EOF'
-warning: built with stable ad-hoc signing because no matching code signing identity was found.
-         The designated requirement is pinned to the bundle identifier to reduce TCC permission resets.
-         If you later create a valid identity, set DUALSENSEKIT_CODESIGN_IDENTITY to use it.
+DEFAULT_SIGN_IDENTITY="C9174737F5E60E299686A564D88061F287551143"
+SIGN_IDENTITY="${DUALSENSEKIT_CODESIGN_IDENTITY:-${CODESIGN_IDENTITY:-$DEFAULT_SIGN_IDENTITY}}"
+if ! security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY"; then
+  cat >&2 <<EOF
+error: required code signing identity was not found: $SIGN_IDENTITY
+       Refusing to build an ad-hoc signed app because it can reset Accessibility permissions.
+       Check available identities with:
+         security find-identity -v -p codesigning
 EOF
+  exit 1
 fi
+codesign --force --deep --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID" "$APP_DIR"
 
 echo "$BUILD_DIR/$APP_NAME"
 echo "$APP_DIR"

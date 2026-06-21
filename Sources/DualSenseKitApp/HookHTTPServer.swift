@@ -67,7 +67,7 @@ final class HookHTTPServer: @unchecked Sendable {
             send(status: 404, json: ["ok": "false", "error": "hook_not_found"], connection: connection)
             return
         }
-        let result = hookService.execute(hook)
+        let result = hookService.execute(hook, source: "http-hook")
         send(
             status: result.ok ? 200 : 409,
             json: ["ok": result.ok ? "true" : "false", "hook": hook.slug, "message": result.message],
