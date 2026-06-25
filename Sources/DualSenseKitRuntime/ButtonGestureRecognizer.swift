@@ -42,7 +42,12 @@ public final class ButtonGestureRecognizer: @unchecked Sendable {
                     self.emit(ButtonGesture(button: button, kind: .doubleClick))
                 } else {
                     let workItem = DispatchWorkItem { [weak self] in
-                        self?.emit(ButtonGesture(button: button, kind: .singleClick))
+                        guard let self else { return }
+                        self.emit(ButtonGesture(button: button, kind: .singleClick))
+                        // Clear pending state so a subsequent press isn't mistaken for double-click
+                        var s = self.states[button] ?? ButtonState()
+                        s.pendingSingleWorkItem = nil
+                        self.states[button] = s
                     }
                     state.pendingSingleWorkItem = workItem
                     self.queue.asyncAfter(
