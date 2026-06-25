@@ -18,7 +18,8 @@ final class FormalAppCoordinator {
         eventBus: eventBus,
         configStore: configStore,
         actionExecutor: actionExecutor,
-        mappingsProvider: { [profileStore] in profileStore.activeMappings }
+        mappingsProvider: { [profileStore] in profileStore.activeMappings },
+        directKeyProvider: { [profileStore] in profileStore.activeDirectKeys }
     )
     private lazy var lightService = LightService(controllerService: controllerService)
     private lazy var hookService = HookService(

@@ -7,6 +7,8 @@ public final class ControllerService: @unchecked Sendable {
     private let configStore: ConfigStore
     private let actionExecutor: ActionExecutor
     private let mappingsProvider: (@Sendable () -> [ButtonGesture: [Action]])?
+    private let directKeyProvider: (@Sendable () -> [ControllerButton: KeyStroke])?
+    private var directKeyActive: Set<ControllerButton> = []
     private let touchpadMapper = TouchpadMouseMapper()
     private let stickMouseMapper = StickMouseMapper()
     private let stateQueue = DispatchQueue(label: "DualSenseKitDemo.ControllerState")
@@ -75,12 +77,14 @@ public final class ControllerService: @unchecked Sendable {
         eventBus: EventBus,
         configStore: ConfigStore,
         actionExecutor: ActionExecutor,
-        mappingsProvider: (@Sendable () -> [ButtonGesture: [Action]])? = nil
+        mappingsProvider: (@Sendable () -> [ButtonGesture: [Action]])? = nil,
+        directKeyProvider: (@Sendable () -> [ControllerButton: KeyStroke])? = nil
     ) {
         self.eventBus = eventBus
         self.configStore = configStore
         self.actionExecutor = actionExecutor
         self.mappingsProvider = mappingsProvider
+        self.directKeyProvider = directKeyProvider
     }
 
     public func start() {
@@ -108,6 +112,10 @@ public final class ControllerService: @unchecked Sendable {
         hidService.stop()
         GCController.stopWirelessControllerDiscovery()
         NotificationCenter.default.removeObserver(self)
+    }
+
+    public func releaseAllHeldKeys() {
+        actionExecutor.releaseAllHeld(config: configStore.current)
     }
 
     public func setPlayerLEDs(mask: UInt8, brightness: UInt8? = nil) -> Bool {
@@ -316,7 +324,31 @@ public final class ControllerService: @unchecked Sendable {
                 "value": "\(value)"
             ]))
         }
-        recognizer.update(button: button, pressed: pressed, value: value)
+
+        // 1:1 real-time key mapping — bypasses gesture recognizer entirely.
+        // On press: immediately keyDown, on release: keyUp.
+        // Tracks held keys so profile-switch edge cases release properly.
+        if let directStroke = directKeyProvider?()[button] {
+            if oldState.pressed != pressed {
+                if pressed {
+                    actionExecutor.beginActions([.keyStroke(directStroke)], for: button, config: configStore.current)
+                } else {
+                    actionExecutor.endActions(for: button, config: configStore.current)
+                }
+            }
+            stateQueue.sync {
+                if pressed { directKeyActive.insert(button) }
+                else { directKeyActive.remove(button) }
+            }
+        } else {
+            // Button was in direct key mode but mapping was removed (profile switch while held)
+            let wasDirectHeld: Bool = stateQueue.sync { directKeyActive.contains(button) }
+            if wasDirectHeld, oldState.pressed && !pressed {
+                actionExecutor.endActions(for: button, config: configStore.current)
+                _ = stateQueue.sync { directKeyActive.remove(button) }
+            }
+            recognizer.update(button: button, pressed: pressed, value: value)
+        }
     }
 
     private func handleGesture(_ gesture: ButtonGesture) {

@@ -559,6 +559,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
     }
 
     private func slotSummary(for button: ControllerButton) -> String {
+        // Real-time 1:1 key mapping takes priority in display
+        if let dk = editingProfile.directKeyMappings[button] {
+            return "实时: " + KeyCatalog.describe(dk)
+        }
         let priority: [PressKind] = [.press, .singleClick, .doubleClick, .longPress, .release]
         for kind in priority {
             let actions = editingProfile.mappings[ButtonGesture(button: button, kind: kind)] ?? []
@@ -578,6 +582,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         let editor = BindingEditorController()
         editor.controllerButton = button
         editor.profileMappings = editingProfile.mappings
+        editor.existingDirectKeyStroke = editingProfile.directKeyMappings[button]
         editor.onBindingChanged = { [weak self] gesture, actions in
             guard let self else { return }
             if let actions {
@@ -588,10 +593,20 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             self.profileStore.upsert(self.editingProfile)
             self.slotViews[gesture.button]?.updateSummary(self.slotSummary(for: gesture.button))
         }
+        editor.onDirectKeyChanged = { [weak self] button, stroke in
+            guard let self else { return }
+            self.editingProfile.directKeyMappings[button] = stroke
+            // Direct key mode is mutually exclusive with gesture mappings for the same button
+            for kind in PressKind.allCases {
+                self.editingProfile.mappings.removeValue(forKey: ButtonGesture(button: button, kind: kind))
+            }
+            self.profileStore.upsert(self.editingProfile)
+            self.slotViews[button]?.updateSummary(self.slotSummary(for: button))
+        }
         let pop = NSPopover()
         pop.contentViewController = editor
         pop.behavior = .semitransient
-        pop.contentSize = NSSize(width: 360, height: 330)
+        pop.contentSize = NSSize(width: 360, height: 350)
         pop.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
         activePopover = pop
     }
@@ -2081,11 +2096,14 @@ final class BindingEditorController: NSViewController {
     var controllerButton: ControllerButton = .buttonA
     var profileMappings: [ButtonGesture: [Action]] = [:]
     var onBindingChanged: ((ButtonGesture, [Action]?) -> Void)?
+    var existingDirectKeyStroke: KeyStroke?
+    var onDirectKeyChanged: ((ControllerButton, KeyStroke?) -> Void)?
 
     private var selectedKind: PressKind = .press
     private var capturedStroke: KeyStroke?
     private var selectedAppPath: String?
     private var keyMonitor: Any?
+    private var isDirectKeyMode: Bool = false
 
     private let gestureSC = NSSegmentedControl()
     private let currentBindingLabel = NSTextField(labelWithString: "—")
@@ -2100,6 +2118,10 @@ final class BindingEditorController: NSViewController {
     private let appLabel  = NSTextField(labelWithString: "未选择")
     private let clearBtn  = NSButton(title: "清空", target: nil, action: nil)
     private let saveBtn   = NSButton(title: "保存", target: nil, action: nil)
+    private let directKeyCheckbox = NSButton(checkboxWithTitle: "实时按键映射（1:1 模拟真实键盘）", target: nil, action: nil)
+
+    // Gesture-mode views that get hidden in real-time key mapping mode
+    private var gestureModeViews: [NSView] = []
 
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 330))
@@ -2199,7 +2221,16 @@ final class BindingEditorController: NSViewController {
         keyLabel.font = .systemFont(ofSize: 11)
         keyLabel.textColor = NSColor(white: 0.55, alpha: 1)
 
+        directKeyCheckbox.target = self
+        directKeyCheckbox.action = #selector(toggleDirectKeyMode)
+        directKeyCheckbox.controlSize = .small
+        directKeyCheckbox.font = .systemFont(ofSize: 11)
+        directKeyCheckbox.translatesAutoresizingMaskIntoConstraints = false
+
+        gestureModeViews = [gestureSC, currentBindingLabel, sep, actionLabel, actionPopup, keyLabel, appRow]
+
         stack.addArrangedSubview(titleLabel)
+        stack.addArrangedSubview(directKeyCheckbox)
         stack.addArrangedSubview(gestureSC)
         stack.addArrangedSubview(currentBindingLabel)
         stack.addArrangedSubview(sep)
@@ -2222,17 +2253,25 @@ final class BindingEditorController: NSViewController {
             gestureSC.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32)
         ])
 
-        // Pre-select the gesture kind that already has a binding for this button
-        let bindingPriority: [PressKind] = [.press, .singleClick, .doubleClick, .longPress, .release]
-        for kind in bindingPriority {
-            if profileMappings[ButtonGesture(button: controllerButton, kind: kind)] != nil,
-               let idx = PressKind.allCases.firstIndex(of: kind) {
-                gestureSC.selectedSegment = idx
-                break
+        // If button has a direct key mapping, start in real-time 1:1 mode
+        if let dk = existingDirectKeyStroke {
+            isDirectKeyMode = true
+            directKeyCheckbox.state = .on
+            applyStroke(dk)
+            updateDirectKeyModeVisibility()
+            currentBindingLabel.stringValue = "实时按键: \(KeyCatalog.describe(dk))"
+        } else {
+            // Pre-select the gesture kind that already has a binding for this button
+            let bindingPriority: [PressKind] = [.press, .singleClick, .doubleClick, .longPress, .release]
+            for kind in bindingPriority {
+                if profileMappings[ButtonGesture(button: controllerButton, kind: kind)] != nil,
+                   let idx = PressKind.allCases.firstIndex(of: kind) {
+                    gestureSC.selectedSegment = idx
+                    break
+                }
             }
+            reloadForCurrentGesture()
         }
-
-        reloadForCurrentGesture()
     }
 
     private func setupActionPopup() {
@@ -2259,6 +2298,36 @@ final class BindingEditorController: NSViewController {
         }
         keyPopup.target = self
         keyPopup.action = #selector(keyChanged)
+    }
+
+    @objc private func toggleDirectKeyMode() {
+        isDirectKeyMode = directKeyCheckbox.state == .on
+        if isDirectKeyMode {
+            capturedStroke = existingDirectKeyStroke
+            if let stroke = capturedStroke {
+                currentBindingLabel.stringValue = "实时按键: \(KeyCatalog.describe(stroke))"
+                applyStroke(stroke)
+            } else {
+                capturedStroke = KeyCatalog.options.first.map { KeyStroke(keyCode: $0.keyCode, modifiers: []) }
+                if let stroke = capturedStroke {
+                    applyStroke(stroke)
+                    currentBindingLabel.stringValue = "实时按键: \(KeyCatalog.describe(stroke))"
+                }
+            }
+        } else {
+            reloadForCurrentGesture()
+        }
+        updateDirectKeyModeVisibility()
+    }
+
+    private func updateDirectKeyModeVisibility() {
+        for v in gestureModeViews {
+            v.isHidden = isDirectKeyMode
+        }
+        // In direct key mode, force action kind to shortcut for save logic
+        if isDirectKeyMode {
+            selectActionKind(.shortcut)
+        }
     }
 
     @objc private func gestureChanged() {
@@ -2347,34 +2416,48 @@ final class BindingEditorController: NSViewController {
     }
 
     @objc private func clearAction() {
-        onBindingChanged?(currentGesture(), nil)
-        profileMappings.removeValue(forKey: currentGesture())
-        reloadForCurrentGesture()
+        if isDirectKeyMode {
+            onDirectKeyChanged?(controllerButton, nil)
+            existingDirectKeyStroke = nil
+            currentBindingLabel.stringValue = "—"
+            capturedStroke = nil
+        } else {
+            onBindingChanged?(currentGesture(), nil)
+            profileMappings.removeValue(forKey: currentGesture())
+            reloadForCurrentGesture()
+        }
     }
 
     @objc private func saveAction() {
-        let gesture = currentGesture()
-        let actions: [Action]?
-        switch currentActionKind() {
-        case .none:
-            actions = nil
-        case .shortcut:
-            actions = [.keyStroke(capturedStroke ?? selectedFallbackStroke())]
-        case .mouseLeft:
-            actions = [.mouseClick(.left)]
-        case .mouseRight:
-            actions = [.mouseClick(.right)]
-        case .mouseMiddle:
-            actions = [.mouseClick(.middle)]
-        case .appSwitch:
-            actions = [.keyStroke(appSwitchStroke())]
-        case .openApplication:
-            guard let path = selectedAppPath else { NSSound.beep(); return }
-            actions = [.openApplication(path)]
+        if isDirectKeyMode {
+            let stroke = capturedStroke ?? selectedFallbackStroke()
+            onDirectKeyChanged?(controllerButton, stroke)
+            existingDirectKeyStroke = stroke
+            currentBindingLabel.stringValue = "实时按键: \(KeyCatalog.describe(stroke))"
+        } else {
+            let gesture = currentGesture()
+            let actions: [Action]?
+            switch currentActionKind() {
+            case .none:
+                actions = nil
+            case .shortcut:
+                actions = [.keyStroke(capturedStroke ?? selectedFallbackStroke())]
+            case .mouseLeft:
+                actions = [.mouseClick(.left)]
+            case .mouseRight:
+                actions = [.mouseClick(.right)]
+            case .mouseMiddle:
+                actions = [.mouseClick(.middle)]
+            case .appSwitch:
+                actions = [.keyStroke(appSwitchStroke())]
+            case .openApplication:
+                guard let path = selectedAppPath else { NSSound.beep(); return }
+                actions = [.openApplication(path)]
+            }
+            onBindingChanged?(gesture, actions)
+            profileMappings[gesture] = actions
+            reloadForCurrentGesture()
         }
-        onBindingChanged?(gesture, actions)
-        profileMappings[gesture] = actions
-        reloadForCurrentGesture()
     }
 
     private func updateControlVisibility() {

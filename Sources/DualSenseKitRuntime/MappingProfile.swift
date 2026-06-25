@@ -6,19 +6,22 @@ public struct MappingProfile: Codable, Equatable, Sendable, Identifiable {
     public var bundleIdentifier: String?
     public var isDefault: Bool
     public var mappings: [ButtonGesture: [Action]]
+    public var directKeyMappings: [ControllerButton: KeyStroke]
 
     public init(
         id: UUID = UUID(),
         name: String,
         bundleIdentifier: String? = nil,
         isDefault: Bool = false,
-        mappings: [ButtonGesture: [Action]] = [:]
+        mappings: [ButtonGesture: [Action]] = [:],
+        directKeyMappings: [ControllerButton: KeyStroke] = [:]
     ) {
         self.id = id
         self.name = name
         self.bundleIdentifier = bundleIdentifier
         self.isDefault = isDefault
         self.mappings = mappings
+        self.directKeyMappings = directKeyMappings
     }
 
     enum CodingKeys: String, CodingKey {
@@ -27,6 +30,7 @@ public struct MappingProfile: Codable, Equatable, Sendable, Identifiable {
         case bundleIdentifier
         case isDefault
         case mappings
+        case directKeyMappings
     }
 
     public init(from decoder: Decoder) throws {
@@ -36,6 +40,7 @@ public struct MappingProfile: Codable, Equatable, Sendable, Identifiable {
         bundleIdentifier = try container.decodeIfPresent(String.self, forKey: .bundleIdentifier)
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
         mappings = try container.decodeIfPresent([ButtonGesture: [Action]].self, forKey: .mappings) ?? [:]
+        directKeyMappings = try container.decodeIfPresent([ControllerButton: KeyStroke].self, forKey: .directKeyMappings) ?? [:]
     }
 }
 

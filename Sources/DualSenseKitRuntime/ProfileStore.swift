@@ -11,6 +11,7 @@ public final class ProfileStore: @unchecked Sendable {
 
     private var _activeProfileID: UUID?
     private var _activeMappings: [ButtonGesture: [Action]] = [:]
+    private var _activeDirectKeys: [ControllerButton: KeyStroke] = [:]
 
     public var activeProfileID: UUID? {
         activeLock.lock()
@@ -22,6 +23,12 @@ public final class ProfileStore: @unchecked Sendable {
         activeLock.lock()
         defer { activeLock.unlock() }
         return _activeMappings
+    }
+
+    public var activeDirectKeys: [ControllerButton: KeyStroke] {
+        activeLock.lock()
+        defer { activeLock.unlock() }
+        return _activeDirectKeys
     }
 
     public init(profilesURL: URL? = nil) {
@@ -145,6 +152,7 @@ public final class ProfileStore: @unchecked Sendable {
         activeLock.lock()
         _activeProfileID = profile.id
         _activeMappings = profile.mappings
+        _activeDirectKeys = profile.directKeyMappings
         activeLock.unlock()
     }
 
