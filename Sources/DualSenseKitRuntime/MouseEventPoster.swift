@@ -17,12 +17,12 @@ public final class MouseEventPoster: MousePosting {
     public func moveBy(dx: Double, dy: Double) {
         guard permissionService.isAccessibilityTrusted() else { return }
         let current = NSEvent.mouseLocation
-        let screenFrame = Self.screenFrame(containing: current) ?? Self.unionScreenFrame()
+        let unionFrame = Self.unionScreenFrame()
         let nextAppKit = CGPoint(
-            x: min(screenFrame.maxX - 1, max(screenFrame.minX, current.x + dx)),
-            y: min(screenFrame.maxY - 1, max(screenFrame.minY, current.y + dy))
+            x: min(unionFrame.maxX, max(unionFrame.minX, current.x + dx)),
+            y: min(unionFrame.maxY, max(unionFrame.minY, current.y + dy))
         )
-        let mainMaxY = NSScreen.screens.first?.frame.maxY ?? screenFrame.maxY
+        let mainMaxY = NSScreen.screens.first?.frame.maxY ?? unionFrame.maxY
         let nextQuartz = CGPoint(x: nextAppKit.x, y: mainMaxY - nextAppKit.y)
         CGWarpMouseCursorPosition(nextQuartz)
 
